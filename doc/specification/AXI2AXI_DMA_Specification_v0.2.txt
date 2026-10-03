@@ -1,0 +1,381 @@
+AXI-to-AXI DMA Controller 規格書
+v0.2 回覆整合版｜2026-10-03
+
+文件基礎與閱讀方式
+依 v0.1(1) 文件附錄 B.1～B.11 的回覆修訂，已確認事項直接納入正文。
+維持第 1～25 項編號、register offsets、既有 status codes 及 burst/FIFO/timeout 預設。
+新增 STATUS_CODE=0xD：SRC_PROTOCOL_ERROR。附錄 A 提供回覆對照，附錄 B 說明具體化解讀。
+本版不新增重複 START 防護、command queue 或 AXI USER signals。
+
+1. 功能概要
+   DMA Controller 透過兩個 AXI Master interface，在 Source 與 Target 之間搬移資料。
+   軟體透過 APB 設定 Source address、Target address、transfer byte count，並發出 START。
+
+2. AXI interface 分工
+   Source：Read-only Master，僅使用 AR、R channel。
+   Target：Write-only Master，僅使用 AW、W、B channel。
+   搬移資料順序必須保持，Target 寫入的有效 bytes 對應 Source 的連續 bytes。
+
+3. Clock domain
+   Register interface 使用 PCLK；DMA datapath 與兩端 AXI interface 使用 AXI_CLK。
+   PCLK 與 AXI_CLK 非同步；Source 與 Target 的 AXI clock 相同。
+   不得直接將多位元 configuration 或短暫 event 跨域使用。
+
+4. AXI 規格
+   a. 支援 AXI4，AXI_ADDR_WIDTH 固定 32 bits。
+      AXI_DATA_WIDTH 預設 32 bits；AXI_ID_WIDTH 預設 6 bits。
+      MAX_BURST_LENGTH 預設 8 beats。
+      BYTES_PER_BEAT = AXI_DATA_WIDTH / 8。
+      ARSIZE = AWSIZE = log2(BYTES_PER_BEAT)，Single 與 Burst 使用相同 SIZE。
+      AXI_DATA_WIDTH 合法值為 8、16、32、64、128、256、512、1024 bits。
+      BYTES_PER_BEAT 為 2 的整數次方，AxSIZE 可由 3 bits 表示。
+      AXI_ID_WIDTH >= 1；APB_ADDR_WIDTH >= 5；AXI_TIMEOUT_CYCLES >= 0。
+      ID 為 constant。PROT 與 sideband 定義見第 24 項。
+   b. Burst type 僅支援 INCR，ARBURST = AWBURST = 2'b01。
+   c. Source 與 Target 可獨立設定 Single 或 Burst，見第 6 項。
+   d. AR、AW、B channel 不要求額外 FIFO；仍須保存待 handshake 的命令及必要狀態。
+      Source read 與 Target write 共用一個 synchronous data FIFO。
+      FIFO 具有獨立 read/write ports，可用 dual-port SRAM 或 register-based FIFO 實作。
+      每個 data entry 的寬度為 AXI_DATA_WIDTH；DATA_FIFO_DEPTH 預設 8 entries。
+      FIFO depth 與 data width 由 top-level parameter 設定。
+   e. Source 與 Target 使用同一 AXI_CLK。
+   f. 任一 Source read 或 Target write burst 都不得跨越 4KB address boundary。
+   g. 每端最多 1 筆 outstanding，可同時存在 1 筆 Source read 與 1 筆 Target write。
+      Source 自 AR handshake 至對應正常 read burst 結束，不發下一筆 AR。
+      Target 自 AW handshake 至相符 BID 的 B handshake，不發下一筆 AW。
+      已 assert 但尚未 handshake 的 AR/AW 同樣占用該端 command slot。
+   h. Timeout 是等待外部 AXI slave forward progress 的 watchdog。
+      AXI_TIMEOUT_CYCLES 預設 1024；0 表示停用；n 表示連續 n 個 AXI clocks 無進展。
+      Counter 僅在等待 slave 進展時累計；相關 handshake 成立時歸零。
+      若到期當拍發生相關 handshake，該拍視為有進展，不產生該次 Timeout。
+      由內部 FIFO full 造成的 Source backpressure 不得計入 Source timeout。
+      Recovery 行為依第 20 項，不使用 timeout 自行撤回 AXI VALID。
+      Source/Target 各有獨立 counter；enable/reset 條件依第 20.4 項。
+   i. Target 必須等完整 write burst payload 已存在 FIFO，且全部 payload 來自
+      已完成並確認成功的 Source bursts，才可 assert AWVALID。
+      Assert AWVALID 時必須保留該 burst 所需 payload，直到完成 W channel 傳輸。
+   j. 合法 configuration：
+      DATA_FIFO_DEPTH >= MAX_BURST_LENGTH。
+      1 <= MAX_BURST_LENGTH <= 256；不要求 burst length 為 power of two。
+      違反上述限制為非法 elaboration configuration，simulation 應報錯並停止。
+
+5. Register interface（APB）
+   APB_DATA_WIDTH 固定 32 bits。
+   APB_ADDR_WIDTH 可參數化，預設 12 bits。
+   採用 APB3：PCLK、PRESETn、PSEL、PENABLE、PWRITE、PADDR、PWDATA、
+   PRDATA、PREADY、PSLVERR。
+   Register offset 以 byte address 表示。
+   Undefined register address 存取回傳 PSLVERR；reserved bits read as zero、write ignored。
+   APB 完成條件為 PSEL && PENABLE && PREADY。
+   PREADY 固定 1，不提供 wait states。
+   PADDR[1:0] != 0 回傳 PSLVERR，不截除低位元或 alias 至其他 register。
+   PSLVERR 僅於 PSEL && PENABLE 的非法 access assert。
+   非法 read 的 PRDATA=0；非法 write 不修改 register 或產生 START/W1C。
+
+6. Register definition
+   6.1 Offset 0x000：DMA_SRC_ADDR
+       [31:0] R/W：Source byte address。
+   6.2 Offset 0x004：DMA_TARGET_ADDR
+       [31:0] R/W：Target byte address。
+       Source/Target address 均必須對齊 BYTES_PER_BEAT，見第 7 項。
+   6.3 Offset 0x008：DMA_LENGTH
+       [17] R/W：TARGET_SINGLE，1 = 每筆 AWLEN=0；0 = Burst（預設）。
+       [16] R/W：SOURCE_SINGLE，1 = 每筆 ARLEN=0；0 = Burst（預設）。
+       [11:0] R/W：LENGTH_MINUS_1。
+       TRANSFER_BYTES = LENGTH_MINUS_1 + 1，範圍 1～4096 bytes。
+       0x000 = 1 byte；0xFFF = 4096 bytes。
+       其他 bits reserved。
+       Single 僅表示 AxLEN=0，並非 AxSIZE=0。
+       AXI_DATA_WIDTH=32 時，ARSIZE=AWSIZE=3'b010。
+   6.4 Offset 0x00C：DMA_CTRL
+       [31] Write：START write-one command，不保存為 register bit。
+            Write 0 無作用；DMA busy 時 Write 1 忽略。
+            只有 accepted START 才清除既有 status 與 interrupt，見第 18 項。
+       [31] Read：同步至 PCLK 的 BUSY；1=busy、0=idle。
+       [3:0] Read：STATUS_CODE，軟體寫入不修改 status。
+            0x0：NO_ERROR（原名稱 OKAY / NO ERROR）
+            0x8：SRC_RESP_ERROR
+            0x9：DST_RESP_ERROR
+            0xA：SRC_TIMEOUT
+            0xB：DST_TIMEOUT
+            0xC：CONFIG_ERROR
+            0xD：SRC_PROTOCOL_ERROR（RLAST 位置不符，須 reset recovery）
+       其他 bits reserved。
+       Protocol error 行為依第 23 項；既有 codes 不重新編號。
+   6.5 Offset 0x010：INTR_CTRL
+       [0] Read：IRQ pending；0=無 interrupt、1=有 interrupt。
+       [0] Write：W1C；Write 1 清除 IRQ pending，Write 0 無作用。
+       其他 bits reserved。
+   所有 software-visible registers、shadow configuration、BUSY、STATUS_CODE、
+   IRQ pending、FIFO bookkeeping 與相關 CDC/執行狀態 reset 為 0。
+   DMA_LENGTH reset=0 代表 1-byte 設定，reset 不會啟動 DMA；兩端預設 Burst。
+
+7. Address alignment 與有效 bytes
+   Source/Target address 必須為 BYTES_PER_BEAT 的整數倍。
+   AXI_DATA_WIDTH=32 時，兩端 address[1:0] 必須為 2'b00。
+   Misaligned address 為 CONFIG_ERROR，不忽略或截除 address low bits。
+   Configuration 不合法時不得 issue 任何 AXI transaction；BUSY 維持 0，產生 IRQ。
+   Transfer byte count 不必是 BYTES_PER_BEAT 的整數倍。
+   除最後一個 partial beat 外，WSTRB 全為 1。
+   最後一個 beat 若只剩 k bytes，WSTRB[k-1:0]=1，其餘為 0。
+   例：32-bit data、10-byte DMA，三個 W beats 的 WSTRB 依序為 1111、1111、0011。
+
+8. 4KB boundary
+   Source 與 Target 分別計算 boundary，並獨立切分 burst。
+   Source/Target burst length 不必相同，也不要求一對一對應。
+   每個 burst 的地址範圍不得跨越所屬 4KB page。
+   不以 overflow 或 Source/Target overlap 判定 CONFIG_ERROR，由 software 負責。
+   不提供 overlap-safe / memmove 保證。
+   Address 算術使用 32 bits，超出 0xFFFFFFFF 按 modulo 2^32 wrap 至 0。
+   使用 wrap-around 仍須讓每個實際 burst 遵守 4KB boundary。
+
+9. Interrupt
+   dma_irq 為 PCLK domain 的 level signal，由 IRQ pending register 驅動。
+   下列事件產生 IRQ：DMA completion、Source/Target timeout、RESP error、CONFIG_ERROR、
+   SRC_PROTOCOL_ERROR。
+   軟體透過 INTR_CTRL[0] W1C 清除；accepted START 也會清除前次 IRQ。
+   AXI domain 的完成/error event 必須可靠跨域，不能直接以短 pulse 送至 PCLK。
+   新 event 與 W1C 或 START clear 同一 PCLK 到達時採 set-dominant，IRQ pending=1。
+   Error/timeout 偵測後經可靠 CDC 盡快發布 STATUS_CODE 與 IRQ，不等 recovery 完成。
+   不要求在 AXI 偵測當拍立即反映於 PCLK；BUSY 可繼續保持 1。
+   同一 DMA 的錯誤 episode 只發布一次錯誤 IRQ；recovery 完成不追加 success IRQ。
+   Recovery 中再次到期不得反覆發布相同 timeout event。
+
+10. AXI response error handling
+    僅 RRESP/BRESP=2'b00（OKAY）視為成功。
+    EXOKAY、SLVERR、DECERR 均視為 response error。
+    Source error 對應 SRC_RESP_ERROR；Target error 對應 DST_RESP_ERROR。
+    偵測 error 後停止建立新的 AXI transaction，進入 recovery。
+    已 assert VALID 的 transaction 及已 accepted burst 依第 20 項完成或等待 reset。
+    已有 Target write payload 的保護與 Source FIFO discard 依第 22 項。
+    只有所有既有 AXI obligation 完成後，才可清除 BUSY 並回到 IDLE。
+    DMA transfer 非 atomic；先前已完成的 Target writes 不 rollback。
+    Error 後 destination 可能只有部分資料更新，software 不得假設 destination 未改變。
+    採 first-error-wins，首個 error 保持至 accepted START 或 reset。
+    同拍首次 Source 與 Target error 以 Source 優先。
+    同端同拍以 protocol error > RESP error > timeout 排序。
+    相符 response handshake 視為進展，不同時觸發該等待的 timeout。
+    後續 error 不覆蓋 status，但仍執行必要 recovery；protocol fault 仍可鎖住 DMA。
+
+11. Configuration snapshot 與 CDC
+    START 時取得 configuration snapshot，存入內部 shadow registers。
+    DMA 執行期間的 APB configuration writes 僅影響下一次 DMA。
+    PCLK→AXI_CLK 的 multi-bit snapshot 使用 coherent CDC handshake。
+    Snapshot 在接收端確認之前必須保持穩定，避免新 APB writes 修改已送出的內容。
+    BUSY 的 owner 為 AXI_CLK domain；APB readback 使用同步後的值。
+    Completion/error 與 STATUS_CODE 必須以一致的 event/data 跨域方式更新 APB-visible image。
+    不要求 command-pending 防護或命令佇列，DMA_CTRL[31] 僅讀回同步 AXI BUSY。
+    Software 必須避免 START handshake 尚未完成、前次結果尚未收妥、或 DMA
+    執行/recovery 中重送 START，不利用 BUSY CDC 尚未更新的空窗重送。
+    已送出 snapshot 獨立於可寫 APB configuration image，合法 configuration writes
+    不得破壞 current snapshot；正常單筆 START 仍須使用 coherent CDC。
+    違反上述 software contract 的重複 START，不保證命令保留、排序或 configuration
+    一致性；硬體無須防護。
+
+12. Reset
+    AXI 與 APB 共用外部 asynchronous reset。
+    各 domain 使用獨立 reset synchronizer：asynchronous assertion、synchronous deassertion。
+    Reset 清除 pending command、CDC handshake 狀態、FIFO 與 DMA 執行狀態。
+    Reset 期間不得維持舊 transaction 的 VALID 或 IRQ。
+    所有 registers/state reset 為 0，見第 6 項。
+    系統以 reset 解救 stalled AXI transaction 時，須確保相關 slave/interconnect 的
+    reset coordination；僅清除 DMA 本身不能保證外部 AXI transaction 已被取消。
+
+13. RTL implementation
+    使用可合成 Verilog 實作。
+    Module partition 不改變本文件定義的 software-visible behavior。
+    Parameter legality 檢查不得成為不可合成的 datapath/control 邏輯。
+
+14. 功耗
+    在 IDLE 且無未完成 AXI obligation 時：
+    ARVALID=0、AWVALID=0、WVALID=0、RREADY=0、BREADY=0。
+    ASIC 可對 idle Read/Write Engine 或 datapath 使用合法 clock gating。
+    Clock gating 不得阻止 START、reset、CDC event 或既有 transaction 的處理。
+    Error recovery 尚有 transaction 時，不得套用 IDLE 的 channel-off 規則。
+
+15. IDLE 與 completion 定義
+    只有不存在 pending VALID request 或 outstanding AXI transaction 時，才可進入 IDLE。
+    正常 DMA completion 必須等待最後一筆 Target write 的 B response 成功接收。
+    Recovery 中若 slave 永不恢復，BUSY 不得提早清除；須等待 transaction 完成或 reset。
+
+16. Architecture 與建議 module partition
+    Control path：APB Register Bank、CDC handshake、AXI-domain Controller/Shadow Registers。
+    Data path：Source Read Engine、Shared DMA Data FIFO、WSTRB Generator、Target Write Engine。
+    Return path：AXI-domain completion/error/status 經 CDC 更新 PCLK-domain register 與 IRQ。
+    建議 module：dma_apb_regs、dma_cdc、dma_ctrl、dma_read_engine、dma_data_fifo、
+    dma_write_engine；WSTRB generation 可放在 Write Engine。
+    Module 命名為實作建議，不是新增 external interface 要求。
+
+17. Burst length calculation
+    remaining_beats = ceil(remaining_bytes / BYTES_PER_BEAT)。
+    整數運算可寫為 (remaining_bytes + BYTES_PER_BEAT - 1) / BYTES_PER_BEAT。
+    beats_before_4KB = (4096 - (current_address mod 4096)) / BYTES_PER_BEAT。
+    兩端地址均 aligned，故上述 boundary beat count 為整數。
+    Source burst beats = min(MAX_BURST_LENGTH, source_remaining_beats,
+                            source_beats_before_4KB, available_FIFO_space)。
+    Target burst beats = min(MAX_BURST_LENGTH, target_remaining_beats,
+                            target_beats_before_4KB, FIFO_verified_data_count)。
+    Source Single=1 時，Source 每個 burst 固定 1 beat。
+    Target Single=1 時，Target 每個 burst 固定 1 beat。
+    Burst beats 必須 >=1，AxLEN=burst_beats-1。
+    FIFO space 必須考慮已承諾給 pending/accepted read burst 的容量。
+    Burst 長度及相關 payload 在 VALID assert 後不得重新計算或修改。
+    Source/Target 使用獨立 remaining/address bookkeeping，不要求 burst length 相等。
+    FIFO_verified_data_count 只計算 FIFO head 起連續的已驗證可用資料，
+    不包含未完成 Source burst 或已保留給當前 Target 的 payload。
+    remaining bytes / beats 計數必須能表示 4096 bytes，不能因長度欄位 12 bits 而截為 0。
+    Target scheduler 仍須同時遵守第 4.i 項與第 22 項。
+
+18. Accepted START 的處理順序
+    1. 清除前次 STATUS_CODE。
+    2. 清除前次 IRQ pending。
+    3. Latch 本次 configuration snapshot。
+    4. Validate configuration。
+    5. 合法：AXI-domain BUSY=1，開始 DMA。
+       不合法：不 issue AXI transaction，BUSY 維持 0，STATUS_CODE=CONFIG_ERROR，產生 IRQ。
+    Ignored START 不修改 status、IRQ 或 current shadow configuration。
+    合法 APB START write 完成時在 PCLK latch snapshot，清除 APB-visible status/IRQ；
+    經 coherent handshake 傳至 AXI_CLK，接收後 latch shadow registers 並 validate。
+    Validation 至少檢查兩端 alignment，不檢查 overflow/overlap。
+    已知 busy 的 START 忽略；START 間隔與 CDC 空窗由 software 處理，見第 11 項。
+
+19. FPGA implementation 選擇
+    提供 FPGA build definition，以選擇 FPGA implementation。
+    FPGA 使用 clock enable，不使用 ICG，不以 RTL 邏輯產生 gated clock。
+    Definition 的具體名稱與 ASIC library cell integration 由 implementation 決定。
+
+20. Timeout recovery 與 AXI obligation
+    20.1 VALID 已 assert、READY 尚未接受
+         記錄 Source/Target TIMEOUT，停止建立新 transaction。
+         當前 VALID 及對應 payload/control 必須保持穩定，直到 handshake 或 AXI reset。
+         不得因 timeout 任意撤回 ARVALID、AWVALID 或 WVALID。
+         即使 timeout 後才 handshake，仍須完成由該 request 產生的 obligation。
+    20.2 Request 已 accepted
+         Accepted transaction 不能由 DMA 自行取消。
+         Read：持續接收 accepted burst 的 R beats，正常 slave 應以 RLAST 結束。
+         Write：送完對應 AWLEN 的全部 W beats，正確產生 WLAST，再等待 B response。
+         不建立下一筆 transaction；若 slave 恢復，完成既有 transaction 後回到 IDLE。
+         Slave 永不接受或不完成時，reset 可能是必要的 recovery 手段。
+    20.3 Ready 與 drain
+         Source error-recovery/drain state：RID 相符時 RREADY 維持 1，接收資料
+         可依規則 discard；ID mismatch 的 qualification 依第 24 項優先。
+         必須保護已承諾給 Target 的 payload，不得以 discard 覆蓋或移除該 payload。
+         等待已存在 write transaction 的相符 BID response 時，BREADY 維持 1；
+         BID mismatch 處理依第 24 項優先。
+         正常 operation 可因 FIFO full 拉低 RREADY，此 internal backpressure 不算 Source timeout。
+    20.4 Counter enable/reset
+         Source/Target counters 分別運作，一端進展不清除另一端 counter。
+         Source AR：ARVALID=1、ARREADY=0 時累計；AR handshake 歸零。
+         Source R：已 accepted read 且 DMA 有容量/可接收時，等待相符 RID 的 R handshake；
+         每筆相符 R handshake 歸零，無 handshake 的等待 clocks 累計。
+         因 internal FIFO full 無法接收時 counter 暫停，該 clocks 不計入 Source timeout。
+         Target AW：AWVALID=1、AWREADY=0 時累計；AW handshake 歸零。
+         Target W：WVALID=1、WREADY=0 時累計；每筆 W handshake 歸零。
+         DMA 自身未 assert WVALID 的資料準備時間不計入 slave timeout。
+         Target B：最後 W handshake 後等待相符 BID 的 B handshake，成立時歸零。
+         AR→R、AW→W、W→B 階段切換時 counter 歸零，重新計算該階段等待時間。
+         ID mismatch 不算進展；若除了 ID qualification 之外已具備接收條件，
+         持續 mismatch 的等待 clocks 仍計入對應 counter。
+         IDLE/無 transaction/timeout disabled 時 counter 不累計且為 0。
+         到期當拍相關 handshake 優先；error 記錄後不重複發布相同 timeout event。
+    20.5 Publication
+         依第 9 項先發布 first-error status/IRQ，再等待 obligation 安全完成。
+         Protocol fault 依第 23 項，不得用普通 drain 完成解除 fault。
+
+21. Full-width Source read 限制
+    Source 永遠使用完整 AXI_DATA_WIDTH beat，不產生 narrow read。
+    Transfer length 非 BYTES_PER_BEAT 整數倍時，最後一個 Source read 可能讀取
+    requested byte range 以外的 bytes；這些額外 bytes 不會寫到 Target。
+    例：32-bit data、address=0x1000、length=1 byte，仍讀取 0x1000～0x1003，
+    Target 僅寫入對應的 1 byte。
+    因此 Source 適用於允許此種 full-width read 的 memory/access region；
+    具有 read side effect 的 peripheral 必須先確認其存取限制。
+
+22. Source RRESP error 與 FIFO data
+    1. Complete/drain 已 accepted Source read burst。
+    2. 不再 launch 使用 failed transfer 資料的新 Target write transaction。
+    3. Discard 尚未 commit 給 Target transaction 的 buffered data。
+    4. 已 assert AWVALID 的 payload 必須保留，即使 AWREADY 尚未接受也不能 discard。
+       AW handshake 後須送完該 burst，等待 B response。
+    採 burst-success qualification：該 Source burst 全部 beats 已接收，全部 RRESP=OKAY，
+    且 RLAST 位置正確後，其資料才成為 verified data，可供新 Target AW 使用。
+    Entry 可先入 FIFO，但未驗證資料不得用於新 Target burst。
+    FIFO 須追蹤 verified data、未驗證 Source burst 與 reserved Target payload；
+    可採計數、指標及狀態，不要求每筆 entry 都增加實體 tag。
+    Source error 時，不提升該 burst 為 verified，丟棄尚未 commit buffered data，
+    但不能以整個 FIFO reset 破壞已承諾給 Target 的 payload。
+    Target 可使用一或多個成功 Source bursts 的已驗證前綴，不能包含未驗證資料。
+    Failed Source burst 的資料不會被新 Target transaction 寫出；較早成功 bursts
+    已造成的 destination updates 仍不 rollback。
+
+23. RLAST / WLAST 與 protocol fault
+    Source 應檢查 RLAST 是否對應 ARLEN 所指定的最後一個 accepted R beat。
+    提前 RLAST，或預期最後一拍缺少 RLAST，視為 protocol error。
+    Target 在第 AWLEN+1 個 W beat assert WLAST；其他 beats 不 assert WLAST。
+    Beat 計數只在 VALID && READY 時前進。
+    僅在相符 RID 的 accepted R handshake 檢查 RLAST；ID 不符不計 beat count。
+    Early RLAST 或預期最後 beat 缺少 RLAST，產生 SRC_PROTOCOL_ERROR（0xD）。
+    按第 10 項 first-error-wins 記錄 status，按第 9 項發布 IRQ。
+    進入 reset-required fault state，停止建立新 AR/AW，BUSY 保持 1，忽略新 START。
+    未驗證資料不得送出；已 assert AWVALID/accepted write 仍依第 20 項完成。
+    Source 對相符 RID 的資料 drain/discard，但不以後續 RLAST/beat count 自動解除 fault。
+    不得宣告成功，只有 coordinated reset 可離開 fault state。
+    若已有其他 first-error，status 保留先前值，但 reset-required fault 行為仍生效。
+
+24. AXI sideband 與 response ID qualification
+    AXI_ID_VALUE：parameter，寬度 AXI_ID_WIDTH，預設 0；兩端 ID 使用 constant。
+    AXI_PROT_VALUE：parameter，3 bits，預設 3'b000；用於 ARPROT/AWPROT。
+    AXI_CACHE_VALUE：parameter，4 bits，預設 4'b0000；用於 ARCACHE/AWCACHE。
+    ARLOCK/AWLOCK=0；ARQOS/AWQOS=0；ARREGION/AWREGION=0。
+    不使用 exclusive access；RESP success 條件仍依第 10 項。
+    省略 ARUSER、RUSER、AWUSER、WUSER、BUSER，不提供 USER signals。
+    RVALID=1 且 RID != AXI_ID_VALUE 時，RREADY=0；不接受、不計數、不入 FIFO，
+    不處理該 beat 的 RRESP/RLAST。
+    BVALID=1 且 BID != AXI_ID_VALUE 時，BREADY=0；不接受、不處理 BRESP，
+    不視為 write completion。
+    不增加 ID mismatch status code；持續等待依第 20.4 項計入 timeout。
+    Timeout disabled 時可能一直等待；timeout 後也不得強行接受不符 ID 的 response。
+    ID qualification 在正常 operation、drain 與 protocol fault 中皆適用。
+
+25. Software 使用流程
+    1. 確認 DMA 可接受新 START；error recovery 未完成時不可重新啟動。
+    2. 設定 DMA_SRC_ADDR、DMA_TARGET_ADDR、DMA_LENGTH。
+    3. 對 DMA_CTRL[31] Write 1。
+    4. 等待 IRQ/event 並讀取 BUSY 與 STATUS_CODE。
+    5. NO_ERROR 且正常 completion 才表示整筆 DMA 成功。
+    6. Error 時 destination 可能部分更新；若 BUSY 仍為 1，仍有 recovery 待完成。
+    7. INTR_CTRL[0] Write 1 清除 interrupt。
+    因 BUSY 有 CDC 延遲，START 後立即讀到 BUSY=0 不代表 DMA 已完成。
+    Software 須序列化 START，完整取得前次結果後才發下一次，不能依賴硬體 pending 防護。
+    Protocol fault 須 reset；普通 timeout/error recovery 持續無法完成時，也須 coordinated reset。
+    Overflow、overlap、Source full-width access 的安全性皆由 software 負責。
+
+附錄 A：回覆與 v0.2 條文對照
+   B.1 每端各 1 筆，可同時 read/write → 第 4.g 項。
+   B.2 獨立 counters、phase 切換重置 → 第 4.h、20.4 項。
+   B.3 PREADY=1、無 wait state、unaligned PSLVERR → 第 5 項。
+   B.4 Reset-required protocol fault，新增 code 0xD → 第 6.4、23 項。
+   B.5 所有 reset values=0 → 第 6、12 項。
+   B.6 Overflow/overlap 不禁止，由 software 負責 → 第 8、25 項。
+   B.7 Set-dominant，error/timeout 先發布 IRQ/status → 第 9、20.5 項。
+   B.8 First-error-wins，Source 優先 → 第 10 項。
+   B.9 不做 START CDC 空窗防護，由 software 處理 → 第 11、18、25 項。
+   B.10 Source burst 全部成功後才允許寫出 → 第 4.i、17、22 項。
+   B.11 RID/BID 不符不接受、USER 省略 → 第 20.3、20.4、24 項。
+
+附錄 B：具體化解讀與軟體責任
+   1. START：無重複命令防護/queue；合法使用仍須單筆 coherent snapshot。
+      Software 避免 CDC 空窗重送；違反 contract 的結果不保證。
+      執行中的一般 configuration writes 仍合法，只影響下一次 snapshot。
+   2. ID mismatch：「不予回應」明訂為 READY=0、不 handshake，優先於一般 drain。
+      Timeout 不代表取消舊 transaction；永久錯誤 ID 可能需 coordinated reset。
+   3. Address：不新增 overflow/overlap CONFIG_ERROR；採 32-bit modulo wrap，
+      軟體負責 memory range、overlap 與 full-width peripheral read side effects。
+   4. 本版為可實作而具體化的細節：
+      AXI data width 為 8～1024 bits 的 2 次方值；APB_ADDR_WIDTH 至少 5。
+      同端 error tie-break 為 protocol > RESP > timeout。
+      非法 APB read 回 0、非法 write 無 side effect。
+      Error recovery 完成不追加 success IRQ；protocol fault 只能 reset 解除。
+      以上補定不新增 register、命令佇列或使用者功能。
+
+文件結束
