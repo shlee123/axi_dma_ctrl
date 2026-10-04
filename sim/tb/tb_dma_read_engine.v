@@ -54,6 +54,7 @@ module tb_dma_read_engine;
     integer timeout_seen;
     integer resp_error_seen;
     integer protocol_seen;
+    integer done_seen;
 
     dma_read_engine #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
@@ -115,6 +116,8 @@ module tb_dma_read_engine;
             resp_error_seen = resp_error_seen + 1;
         if (rd_error_valid && rd_error_code == 4'hD)
             protocol_seen = protocol_seen + 1;
+        if (rd_done)
+            done_seen = done_seen + 1;
     end
 
     task pulse_start;
@@ -199,6 +202,7 @@ module tb_dma_read_engine;
         timeout_seen = 0;
         resp_error_seen = 0;
         protocol_seen = 0;
+        done_seen = 0;
 
         repeat (3) @(posedge clk);
         @(negedge clk);
@@ -213,9 +217,9 @@ module tb_dma_read_engine;
         send_rbeat(32'h1003,2'b00,0);
         send_rbeat(32'h1004,2'b00,1);
         wait_cycles(4);
-        if (commit_seen != 1 || discard_seen != 0 || !rd_done) begin
-            $display("[%0t] ERROR TEST1 commit=%0d discard=%0d done=%b",
-                     $time,commit_seen,discard_seen,rd_done);
+        if (commit_seen != 1 || discard_seen != 0 || done_seen != 1) begin
+            $display("[%0t] ERROR TEST1 commit=%0d discard=%0d done_seen=%0d",
+                     $time,commit_seen,discard_seen,done_seen);
             errors = errors + 1;
         end
 
