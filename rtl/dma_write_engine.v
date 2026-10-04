@@ -232,7 +232,10 @@ module dma_write_engine #(
                 end
 
                 WR_RESERVE: begin
-                    if (fifo_reserve_valid && fifo_reserve_ready) begin
+                    if (wr_abort_new) begin
+                        fifo_reserve_valid <= 1'b0;
+                        state <= WR_HALT;
+                    end else if (fifo_reserve_valid && fifo_reserve_ready) begin
                         fifo_reserve_valid <= 1'b0;
                         active_beats       <= planned_beats;
                         w_beat_index       <= 9'd0;
