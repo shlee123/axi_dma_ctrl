@@ -1,0 +1,69 @@
+name: Full Regression CI
+
+on:
+  push:
+    paths:
+      - 'rtl/*.v'
+      - 'rtl/*.vh'
+      - 'sim/tb/*.v'
+      - '.github/workflows/full-regression-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/*.v'
+      - 'rtl/*.vh'
+      - 'sim/tb/*.v'
+      - '.github/workflows/full-regression-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Run complete directed regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sim/build
+
+          run_tb () {
+            name="$1"
+            shift
+            echo "===== $name ====="
+            iverilog -g2012 -I rtl -s "$name" -o "sim/build/$name.vvp" "$@"
+            vvp "sim/build/$name.vvp" | tee "sim/build/$name.log"
+            grep -q "PASS $name" "sim/build/$name.log"
+          }
+
+          run_tb tb_dma_data_fifo \
+            rtl/dma_data_fifo.v sim/tb/tb_dma_data_fifo.v
+
+          run_tb tb_dma_read_engine \
+            rtl/dma_read_engine.v sim/tb/tb_dma_read_engine.v
+
+          run_tb tb_dma_write_engine \
+            rtl/dma_write_engine.v sim/tb/tb_dma_write_engine.v
+
+          run_tb tb_dma_ctrl \
+            rtl/dma_ctrl.v sim/tb/tb_dma_ctrl.v
+
+          run_tb tb_dma_cdc \
+            rtl/dma_cdc.v sim/tb/tb_dma_cdc.v
+
+          run_tb tb_dma_apb_regs \
+            rtl/dma_apb_regs.v sim/tb/tb_dma_apb_regs.v
+
+          run_tb tb_axi_dma_ctrl_smoke \
+            rtl/dma_reset_sync.v \
+            rtl/dma_data_fifo.v \
+            rtl/dma_read_engine.v \
+            rtl/dma_write_engine.v \
+            rtl/dma_ctrl.v \
+            rtl/dma_cdc.v \
+            rtl/dma_apb_regs.v \
+            rtl/axi_dma_ctrl.v \
+            sim/tb/tb_axi_dma_ctrl_smoke.v
+
+          echo "PASS full regression"
