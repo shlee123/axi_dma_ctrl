@@ -253,9 +253,12 @@ module tb_dma_read_engine;
             $display("[%0t] ERROR TEST3 timeout_seen=%0d", $time,timeout_seen);
             errors = errors + 1;
         end
+        // Failed-burst drain must ignore FIFO backpressure.
+        fifo_wr_ready = 1'b0;
         send_rbeat(32'h3002,2'b00,0);
         send_rbeat(32'h3003,2'b00,0);
         send_rbeat(32'h3004,2'b00,1);
+        fifo_wr_ready = 1'b1;
         wait_cycles(3);
         if (discard_seen != 2) begin
             $display("[%0t] ERROR TEST3 expected second discard, got %0d", $time,discard_seen);
@@ -266,15 +269,30 @@ module tb_dma_read_engine;
             errors = errors + 1;
         end
 
-        // TEST4: protocol fault last, because it is reset-required.
-        $display("[%0t] TEST4 early RLAST protocol fault", $time);
+        // TEST4: 4KB boundary split. 0x0FFC + 8 bytes must become
+        // one beat at 0x0FFC followed by one beat at 0x1000.
+        $display("[%0t] TEST4 4KB boundary split", $time);
+        pulse_start(32'h0000_0FFC, 13'd8);
+        wait_ar_and_accept(32'h0000_0FFC, 8'd0);
+        send_rbeat(32'h4B00_0001,2'b00,1);
+        wait_ar_and_accept(32'h0000_1000, 8'd0);
+        send_rbeat(32'h4B00_0002,2'b00,1);
+        wait_cycles(4);
+        if (commit_seen != 3 || done_seen != 2) begin
+            $display("[%0t] ERROR TEST4 commit=%0d done=%0d",
+                     $time,commit_seen,done_seen);
+            errors = errors + 1;
+        end
+
+        // TEST5: protocol fault last, because it is reset-required.
+        $display("[%0t] TEST5 early RLAST protocol fault", $time);
         pulse_start(32'h0000_4000, 13'd16);
         wait_ar_and_accept(32'h0000_4000, 8'd3);
         send_rbeat(32'h4001,2'b00,0);
         send_rbeat(32'h4002,2'b00,1);
         wait_cycles(3);
         if (protocol_seen != 1 || !rd_protocol_fault) begin
-            $display("[%0t] ERROR TEST4 protocol_seen=%0d fault=%b",
+            $display("[%0t] ERROR TEST5 protocol_seen=%0d fault=%b",
                      $time,protocol_seen,rd_protocol_fault);
             errors = errors + 1;
         end
