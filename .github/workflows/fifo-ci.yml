@@ -1,0 +1,40 @@
+name: FIFO CI
+
+on:
+  push:
+    paths:
+      - 'rtl/dma_data_fifo.v'
+      - 'sim/tb/tb_dma_data_fifo.v'
+      - 'sim/filelist/tb_dma_data_fifo.f'
+      - '.github/workflows/fifo-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/dma_data_fifo.v'
+      - 'sim/tb/tb_dma_data_fifo.v'
+      - 'sim/filelist/tb_dma_data_fifo.f'
+      - '.github/workflows/fifo-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  fifo-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Compile FIFO testbench
+        run: |
+          mkdir -p sim/build
+          iverilog -g2012 \
+            -o sim/build/tb_dma_data_fifo.vvp \
+            rtl/dma_data_fifo.v \
+            sim/tb/tb_dma_data_fifo.v
+
+      - name: Run FIFO testbench
+        run: |
+          set -o pipefail
+          vvp sim/build/tb_dma_data_fifo.vvp | tee sim/build/tb_dma_data_fifo.log
+          grep -q "PASS tb_dma_data_fifo" sim/build/tb_dma_data_fifo.log
