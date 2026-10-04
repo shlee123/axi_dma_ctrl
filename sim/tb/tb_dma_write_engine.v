@@ -301,8 +301,27 @@ module tb_dma_write_engine;
         send_bresp(2'b00);
         wait_cycles(2);
 
-        // TEST4: Abort before reserve handshake must prevent AW.
-        $display("[%0t] TEST4 abort before reserve", $time);
+        // TEST4: 4KB boundary split. 0x0FFC + 8 bytes becomes
+        // one beat at 0x0FFC and one beat at 0x1000.
+        $display("[%0t] TEST4 4KB boundary split", $time);
+        pulse_start(32'h0000_0FFC, 13'd8);
+        wait_reserve(1);
+        wait_aw_and_accept(32'h0000_0FFC, 8'd0);
+        send_wbeat(32'h4B00_0001,4'b1111,1);
+        send_bresp(2'b00);
+
+        wait_reserve(1);
+        wait_aw_and_accept(32'h0000_1000, 8'd0);
+        send_wbeat(32'h4B00_0002,4'b1111,1);
+        send_bresp(2'b00);
+        wait_cycles(3);
+        if (done_seen != 2) begin
+            $display("[%0t] ERROR TEST4 done_seen=%0d", $time,done_seen);
+            errors = errors + 1;
+        end
+
+        // TEST5: Abort before reserve handshake must prevent AW.
+        $display("[%0t] TEST5 abort before reserve", $time);
         pulse_start(32'h0000_4000, 13'd4);
         while (!fifo_reserve_valid) @(posedge clk);
         @(negedge clk);
@@ -312,7 +331,7 @@ module tb_dma_write_engine;
         wr_abort_new = 1'b0;
         wait_cycles(2);
         if (m_axi_awvalid) begin
-            $display("[%0t] ERROR TEST4 AWVALID asserted after pre-reserve abort", $time);
+            $display("[%0t] ERROR TEST5 AWVALID asserted after pre-reserve abort", $time);
             errors = errors + 1;
         end
 
