@@ -49,6 +49,7 @@ module dma_ctrl #(
     output reg                       dma_busy,
     output reg [3:0]                 dma_status_code,
     output reg                       event_valid,
+    input  wire                      event_ready,
     output reg [3:0]                 event_status
 );
 
@@ -95,7 +96,7 @@ module dma_ctrl #(
     wire target_error_now;
     wire protocol_fault_now;
 
-    assign cmd_ready  = (state == CTRL_IDLE);
+    assign cmd_ready  = (state == CTRL_IDLE) && !event_valid;
     assign cmd_accept = cmd_valid && cmd_ready;
 
     generate
@@ -169,7 +170,8 @@ module dma_ctrl #(
             rd_start               <= 1'b0;
             wr_start               <= 1'b0;
             fifo_flush_uncommitted <= 1'b0;
-            event_valid            <= 1'b0;
+            if (event_valid && event_ready)
+                event_valid <= 1'b0;
 
             case (state)
                 CTRL_IDLE: begin
@@ -287,9 +289,13 @@ module dma_ctrl #(
                 CTRL_COMPLETE: begin
                     dma_busy        <= 1'b0;
                     dma_status_code <= `DMA_STATUS_NO_ERROR;
-                    event_valid     <= 1'b1;
-                    event_status    <= `DMA_STATUS_NO_ERROR;
-                    state           <= CTRL_IDLE;
+
+                    if (!event_valid) begin
+                        event_valid  <= 1'b1;
+                        event_status <= `DMA_STATUS_NO_ERROR;
+                    end else if (event_ready) begin
+                        state <= CTRL_IDLE;
+                    end
                 end
 
                 CTRL_PROTOCOL_FAULT: begin
