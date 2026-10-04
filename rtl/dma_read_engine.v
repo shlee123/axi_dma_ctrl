@@ -98,9 +98,10 @@ module dma_read_engine #(
     wire expected_last_beat;
     wire rresp_bad;
 
-    reg [8:0] plan_remaining_beats;
-    reg [8:0] plan_4k_beats;
-    reg [8:0] plan_limit_beats;
+    reg [12:0] plan_remaining_beats;
+    reg [12:0] plan_4k_beats;
+    reg [12:0] plan_limit_beats_wide;
+    reg [8:0]  plan_limit_beats;
     reg [12:0] burst_bytes;
 
     assign rid_match = (m_axi_rid == AXI_ID_VALUE);
@@ -146,9 +147,13 @@ module dma_read_engine #(
         if (plan_4k_beats == 0)
             plan_4k_beats = 9'd1;
 
-        plan_limit_beats = min9(plan_remaining_beats, MAX_BURST_LENGTH[8:0]);
-        plan_limit_beats = min9(plan_limit_beats, plan_4k_beats);
+        plan_limit_beats_wide = plan_remaining_beats;
+        if (plan_limit_beats_wide > MAX_BURST_LENGTH)
+            plan_limit_beats_wide = MAX_BURST_LENGTH;
+        if (plan_limit_beats_wide > plan_4k_beats)
+            plan_limit_beats_wide = plan_4k_beats;
 
+        plan_limit_beats = plan_limit_beats_wide[8:0];
         if (source_single && (plan_limit_beats != 0))
             plan_limit_beats = 9'd1;
 
