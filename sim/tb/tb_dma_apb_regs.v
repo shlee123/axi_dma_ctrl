@@ -144,6 +144,8 @@ module tb_dma_apb_regs;
         end
 
         apb_write(12'h00C,32'h8000_0000);
+        @(posedge pclk);
+        #1;
         if (start_count != 1 || dma_irq) begin
             $display("[%0t] ERROR START count=%0d irq=%b", $time,start_count,dma_irq);
             errors = errors + 1;
