@@ -31,6 +31,7 @@ module dma_cdc #(
 
     input  wire                      dma_busy_axi,
     input  wire                      event_valid_axi,
+    output wire                      event_ready_axi,
     input  wire [3:0]                event_status_axi
 );
 
@@ -61,6 +62,10 @@ module dma_cdc #(
     reg event_toggle_sync1_pclk;
     reg event_toggle_sync2_pclk;
     reg event_toggle_seen_pclk;
+    reg event_ack_toggle_pclk;
+
+    reg event_ack_sync1_axi;
+    reg event_ack_sync2_axi;
 
     // BUSY level synchronizer
     reg busy_sync1_pclk;
@@ -73,6 +78,7 @@ module dma_cdc #(
     assign start_req_arrived_axi = (start_req_sync2_axi != start_req_seen_axi);
     assign start_acknowledged_pclk = (start_ack_sync2_pclk == start_req_toggle_pclk);
     assign event_arrived_pclk = (event_toggle_sync2_pclk != event_toggle_seen_pclk);
+    assign event_ready_axi = (event_ack_sync2_axi == event_toggle_axi);
 
     // PCLK side: hold snapshot stable until ack.
     always @(posedge pclk or negedge preset_n) begin
@@ -94,6 +100,7 @@ module dma_cdc #(
             event_toggle_sync1_pclk  <= 1'b0;
             event_toggle_sync2_pclk  <= 1'b0;
             event_toggle_seen_pclk   <= 1'b0;
+            event_ack_toggle_pclk    <= 1'b0;
             status_code_pclk         <= 4'h0;
             event_pulse_pclk         <= 1'b0;
         end else begin
@@ -110,6 +117,7 @@ module dma_cdc #(
 
             if (event_arrived_pclk) begin
                 event_toggle_seen_pclk <= event_toggle_sync2_pclk;
+                event_ack_toggle_pclk  <= event_toggle_sync2_pclk;
                 status_code_pclk       <= event_status_hold_axi;
                 event_pulse_pclk       <= 1'b1;
             end
@@ -172,9 +180,16 @@ module dma_cdc #(
         if (!axi_reset_n) begin
             event_status_hold_axi <= 4'h0;
             event_toggle_axi      <= 1'b0;
-        end else if (event_valid_axi) begin
-            event_status_hold_axi <= event_status_axi;
-            event_toggle_axi      <= ~event_toggle_axi;
+            event_ack_sync1_axi   <= 1'b0;
+            event_ack_sync2_axi   <= 1'b0;
+        end else begin
+            event_ack_sync1_axi <= event_ack_toggle_pclk;
+            event_ack_sync2_axi <= event_ack_sync1_axi;
+
+            if (event_valid_axi && event_ready_axi) begin
+                event_status_hold_axi <= event_status_axi;
+                event_toggle_axi      <= ~event_toggle_axi;
+            end
         end
     end
 
