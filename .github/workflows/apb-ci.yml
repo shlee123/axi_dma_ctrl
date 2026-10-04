@@ -1,0 +1,31 @@
+name: APB CI
+
+on:
+  push:
+    paths:
+      - 'rtl/dma_apb_regs.v'
+      - 'sim/tb/tb_dma_apb_regs.v'
+      - '.github/workflows/apb-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/dma_apb_regs.v'
+      - 'sim/tb/tb_dma_apb_regs.v'
+      - '.github/workflows/apb-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  apb-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Compile APB testbench
+        run: |
+          mkdir -p sim/build
+          iverilog -g2012 -o sim/build/tb_dma_apb_regs.vvp rtl/dma_apb_regs.v sim/tb/tb_dma_apb_regs.v
+      - name: Run APB testbench
+        run: |
+          set -o pipefail
+          vvp sim/build/tb_dma_apb_regs.vvp | tee sim/build/tb_dma_apb_regs.log
+          grep -q "PASS tb_dma_apb_regs" sim/build/tb_dma_apb_regs.log
