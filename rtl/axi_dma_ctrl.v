@@ -6,10 +6,12 @@ module axi_dma_ctrl #(
     parameter integer MAX_BURST_LENGTH    = 8,
     parameter integer DATA_FIFO_DEPTH     = 8,
     parameter integer AXI_TIMEOUT_CYCLES  = 1024,
-    parameter [AXI_ID_WIDTH-1:0] AXI_ID_VALUE = {AXI_ID_WIDTH{1'b0}}
+    parameter [AXI_ID_WIDTH-1:0] AXI_ID_VALUE = {AXI_ID_WIDTH{1'b0}},
+    parameter [2:0] AXI_PROT_VALUE         = 3'b000,
+    parameter [3:0] AXI_CACHE_VALUE        = 4'b0000
 )(
     input  wire                         pclk,
-    input  wire                         preset_n,
+    input  wire                         reset_n,
 
     input  wire                         psel,
     input  wire                         penable,
@@ -22,7 +24,6 @@ module axi_dma_ctrl #(
     output wire                         dma_irq,
 
     input  wire                         axi_clk,
-    input  wire                         axi_reset_n,
 
     // Source AXI4 master read channels
     output wire [AXI_ID_WIDTH-1:0]      m_src_arid,
@@ -30,6 +31,11 @@ module axi_dma_ctrl #(
     output wire [7:0]                   m_src_arlen,
     output wire [2:0]                   m_src_arsize,
     output wire [1:0]                   m_src_arburst,
+    output wire [2:0]                   m_src_arprot,
+    output wire [3:0]                   m_src_arcache,
+    output wire                         m_src_arlock,
+    output wire [3:0]                   m_src_arqos,
+    output wire [3:0]                   m_src_arregion,
     output wire                         m_src_arvalid,
     input  wire                         m_src_arready,
 
@@ -46,6 +52,11 @@ module axi_dma_ctrl #(
     output wire [7:0]                   m_dst_awlen,
     output wire [2:0]                   m_dst_awsize,
     output wire [1:0]                   m_dst_awburst,
+    output wire [2:0]                   m_dst_awprot,
+    output wire [3:0]                   m_dst_awcache,
+    output wire                         m_dst_awlock,
+    output wire [3:0]                   m_dst_awqos,
+    output wire [3:0]                   m_dst_awregion,
     output wire                         m_dst_awvalid,
     input  wire                         m_dst_awready,
 
@@ -62,6 +73,55 @@ module axi_dma_ctrl #(
 );
 
     localparam integer FIFO_COUNT_WIDTH = $clog2(DATA_FIFO_DEPTH + 1);
+
+    wire preset_n_int;
+    wire axi_reset_n_int;
+
+    assign m_src_arprot   = AXI_PROT_VALUE;
+    assign m_src_arcache  = AXI_CACHE_VALUE;
+    assign m_src_arlock   = 1'b0;
+    assign m_src_arqos    = 4'b0000;
+    assign m_src_arregion = 4'b0000;
+
+    assign m_dst_awprot   = AXI_PROT_VALUE;
+    assign m_dst_awcache  = AXI_CACHE_VALUE;
+    assign m_dst_awlock   = 1'b0;
+    assign m_dst_awqos    = 4'b0000;
+    assign m_dst_awregion = 4'b0000;
+
+`ifndef SYNTHESIS
+    initial begin
+        if (AXI_ADDR_WIDTH != 32)
+            $fatal(1, "AXI_ADDR_WIDTH must be 32");
+        if (!((AXI_DATA_WIDTH == 8)   || (AXI_DATA_WIDTH == 16)  ||
+              (AXI_DATA_WIDTH == 32)  || (AXI_DATA_WIDTH == 64)  ||
+              (AXI_DATA_WIDTH == 128) || (AXI_DATA_WIDTH == 256) ||
+              (AXI_DATA_WIDTH == 512) || (AXI_DATA_WIDTH == 1024)))
+            $fatal(1, "Illegal AXI_DATA_WIDTH");
+        if (AXI_ID_WIDTH < 1)
+            $fatal(1, "AXI_ID_WIDTH must be >= 1");
+        if (APB_ADDR_WIDTH < 5)
+            $fatal(1, "APB_ADDR_WIDTH must be >= 5");
+        if ((MAX_BURST_LENGTH < 1) || (MAX_BURST_LENGTH > 256))
+            $fatal(1, "MAX_BURST_LENGTH must be 1..256");
+        if (DATA_FIFO_DEPTH < MAX_BURST_LENGTH)
+            $fatal(1, "DATA_FIFO_DEPTH must be >= MAX_BURST_LENGTH");
+        if (AXI_TIMEOUT_CYCLES < 0)
+            $fatal(1, "AXI_TIMEOUT_CYCLES must be >= 0");
+    end
+`endif
+
+    dma_reset_sync u_pclk_reset_sync (
+        .clk(pclk),
+        .async_reset_n(reset_n),
+        .sync_reset_n(preset_n_int)
+    );
+
+    dma_reset_sync u_axi_reset_sync (
+        .clk(axi_clk),
+        .async_reset_n(reset_n),
+        .sync_reset_n(axi_reset_n_int)
+    );
 
     // APB / CDC signals
     wire [31:0] cfg_src_addr_pclk;
@@ -141,18 +201,11 @@ module axi_dma_ctrl #(
 
     wire fifo_flush_uncommitted;
 
-    wire [15:0] fifo_verified_count_ext =
-        {{(16-FIFO_COUNT_WIDTH){1'b0}}, fifo_verified_count};
-    wire [15:0] fifo_unverified_count_ext =
-        {{(16-FIFO_COUNT_WIDTH){1'b0}}, fifo_unverified_count};
-    wire [15:0] fifo_reserved_count_ext =
-        {{(16-FIFO_COUNT_WIDTH){1'b0}}, fifo_reserved_count};
-
     dma_apb_regs #(
         .APB_ADDR_WIDTH(APB_ADDR_WIDTH)
     ) u_dma_apb_regs (
         .pclk(pclk),
-        .preset_n(preset_n),
+        .preset_n(preset_n_int),
         .psel(psel),
         .penable(penable),
         .pwrite(pwrite),
@@ -180,7 +233,7 @@ module axi_dma_ctrl #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH)
     ) u_dma_cdc (
         .pclk(pclk),
-        .preset_n(preset_n),
+        .preset_n(preset_n_int),
         .start_pulse(start_pulse_pclk),
         .cfg_src_addr_pclk(cfg_src_addr_pclk),
         .cfg_dst_addr_pclk(cfg_dst_addr_pclk),
@@ -193,7 +246,7 @@ module axi_dma_ctrl #(
         .event_pulse_pclk(event_pulse_pclk),
 
         .axi_clk(axi_clk),
-        .axi_reset_n(axi_reset_n),
+        .axi_reset_n(axi_reset_n_int),
         .cmd_valid(cmd_valid_axi),
         .cmd_ready(cmd_ready_axi),
         .cmd_src_addr(cmd_src_addr_axi),
@@ -210,10 +263,11 @@ module axi_dma_ctrl #(
 
     dma_ctrl #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
-        .AXI_DATA_WIDTH(AXI_DATA_WIDTH)
+        .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+        .FIFO_COUNT_WIDTH(FIFO_COUNT_WIDTH)
     ) u_dma_ctrl (
         .clk(axi_clk),
-        .rst_n(axi_reset_n),
+        .rst_n(axi_reset_n_int),
 
         .cmd_valid(cmd_valid_axi),
         .cmd_ready(cmd_ready_axi),
@@ -244,9 +298,9 @@ module axi_dma_ctrl #(
         .wr_error_valid(wr_error_valid),
         .wr_error_code(wr_error_code),
 
-        .fifo_verified_count(fifo_verified_count_ext),
-        .fifo_unverified_count(fifo_unverified_count_ext),
-        .fifo_reserved_count(fifo_reserved_count_ext),
+        .fifo_verified_count(fifo_verified_count),
+        .fifo_unverified_count(fifo_unverified_count),
+        .fifo_reserved_count(fifo_reserved_count),
         .fifo_flush_uncommitted(fifo_flush_uncommitted),
 
         .dma_busy(dma_busy_axi),
@@ -266,7 +320,7 @@ module axi_dma_ctrl #(
         .AXI_ID_VALUE(AXI_ID_VALUE)
     ) u_dma_read_engine (
         .clk(axi_clk),
-        .rst_n(axi_reset_n),
+        .rst_n(axi_reset_n_int),
         .rd_start(rd_start),
         .rd_abort_new(rd_abort_new),
         .rd_src_addr(rd_src_addr),
@@ -314,7 +368,7 @@ module axi_dma_ctrl #(
         .AXI_ID_VALUE(AXI_ID_VALUE)
     ) u_dma_write_engine (
         .clk(axi_clk),
-        .rst_n(axi_reset_n),
+        .rst_n(axi_reset_n_int),
         .wr_start(wr_start),
         .wr_abort_new(wr_abort_new),
         .wr_dst_addr(wr_dst_addr),
@@ -363,7 +417,7 @@ module axi_dma_ctrl #(
         .COUNT_WIDTH(FIFO_COUNT_WIDTH)
     ) u_dma_data_fifo (
         .clk(axi_clk),
-        .rst_n(axi_reset_n),
+        .rst_n(axi_reset_n_int),
 
         .src_burst_begin(fifo_burst_begin),
         .src_wr_valid(fifo_src_wr_valid),
