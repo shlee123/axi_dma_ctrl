@@ -23,4 +23,5 @@ jobs:
       - name: Compile full RTL top
         run: |
           mkdir -p sim/build
-          iverilog -g2012 -I rtl -s axi_dma_ctrl             -o sim/build/axi_dma_ctrl_top.vvp             rtl/dma_data_fifo.v             rtl/dma_read_engine.v             rtl/dma_write_engine.v             rtl/dma_ctrl.v             rtl/dma_cdc.v             rtl/dma_apb_regs.v             rtl/axi_dma_ctrl.v
+          iverilog -g2012 -I rtl -s axi_dma_ctrl             -o sim/build/axi_dma_ctrl_top.vvp             rtl/dma_reset_sync.v \
+            rtl/dma_data_fifo.v             rtl/dma_read_engine.v             rtl/dma_write_engine.v             rtl/dma_ctrl.v             rtl/dma_cdc.v             rtl/dma_apb_regs.v             rtl/axi_dma_ctrl.v
