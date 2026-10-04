@@ -1,0 +1,63 @@
+name: Parameter Checks CI
+
+on:
+  push:
+    paths:
+      - 'rtl/*.v'
+      - 'rtl/*.vh'
+      - '.github/workflows/parameter-checks-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/*.v'
+      - 'rtl/*.vh'
+      - '.github/workflows/parameter-checks-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  parameter-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Validate legal and illegal parameter sets
+        shell: bash
+        run: |
+          set -u
+          mkdir -p sim/build
+
+          RTL_FILES="rtl/dma_reset_sync.v rtl/dma_data_fifo.v rtl/dma_read_engine.v rtl/dma_write_engine.v rtl/dma_ctrl.v rtl/dma_cdc.v rtl/dma_apb_regs.v rtl/axi_dma_ctrl.v"
+
+          echo "Checking default legal configuration"
+          iverilog -g2012 -I rtl -s axi_dma_ctrl -o sim/build/param_valid.vvp $RTL_FILES
+          vvp sim/build/param_valid.vvp
+
+          echo "Checking alternate legal configuration"
+          iverilog -g2012 -I rtl -s axi_dma_ctrl \
+            -Paxi_dma_ctrl.AXI_DATA_WIDTH=64 \
+            -Paxi_dma_ctrl.MAX_BURST_LENGTH=16 \
+            -Paxi_dma_ctrl.DATA_FIFO_DEPTH=16 \
+            -o sim/build/param_valid_alt.vvp $RTL_FILES
+          vvp sim/build/param_valid_alt.vvp
+
+          expect_invalid () {
+            name="$1"
+            override="$2"
+            out="sim/build/invalid_${name}.vvp"
+            echo "Expecting rejection: $name ($override)"
+            if iverilog -g2012 -I rtl -s axi_dma_ctrl -P"$override" -o "$out" $RTL_FILES && vvp "$out"; then
+              echo "ERROR: illegal configuration was accepted: $name"
+              exit 1
+            fi
+          }
+
+          expect_invalid addr_width "axi_dma_ctrl.AXI_ADDR_WIDTH=64"
+          expect_invalid data_width "axi_dma_ctrl.AXI_DATA_WIDTH=24"
+          expect_invalid id_width "axi_dma_ctrl.AXI_ID_WIDTH=0"
+          expect_invalid apb_width "axi_dma_ctrl.APB_ADDR_WIDTH=4"
+          expect_invalid burst_zero "axi_dma_ctrl.MAX_BURST_LENGTH=0"
+          expect_invalid burst_large "axi_dma_ctrl.MAX_BURST_LENGTH=257"
+          expect_invalid fifo_small "axi_dma_ctrl.DATA_FIFO_DEPTH=4"
+          expect_invalid timeout_negative "axi_dma_ctrl.AXI_TIMEOUT_CYCLES=-1"
+
+          echo "PASS parameter legality checks"
