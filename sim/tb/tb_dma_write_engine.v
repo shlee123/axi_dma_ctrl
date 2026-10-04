@@ -254,6 +254,7 @@ module tb_dma_write_engine;
         send_wbeat(32'h1111_0001,4'b1111,0);
         send_wbeat(32'h1111_0002,4'b1111,0);
         send_wbeat(32'h1111_0003,4'b0011,1);
+        wait_cycles(1);
         if (release_seen != 1) begin
             $display("[%0t] ERROR TEST1 release_seen=%0d", $time, release_seen);
             errors = errors + 1;
