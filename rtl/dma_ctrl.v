@@ -1,8 +1,9 @@
 `include "dma_defines.vh"
 
 module dma_ctrl #(
-    parameter integer AXI_ADDR_WIDTH = 32,
-    parameter integer AXI_DATA_WIDTH = 32
+    parameter integer AXI_ADDR_WIDTH   = 32,
+    parameter integer AXI_DATA_WIDTH   = 32,
+    parameter integer FIFO_COUNT_WIDTH = 4
 )(
     input  wire                      clk,
     input  wire                      rst_n,
@@ -40,9 +41,9 @@ module dma_ctrl #(
     input  wire [3:0]                wr_error_code,
 
     // FIFO status / recovery
-    input  wire [15:0]               fifo_verified_count,
-    input  wire [15:0]               fifo_unverified_count,
-    input  wire [15:0]               fifo_reserved_count,
+    input  wire [FIFO_COUNT_WIDTH-1:0] fifo_verified_count,
+    input  wire [FIFO_COUNT_WIDTH-1:0] fifo_unverified_count,
+    input  wire [FIFO_COUNT_WIDTH-1:0] fifo_reserved_count,
     output reg                       fifo_flush_uncommitted,
 
     // DMA status/event toward dma_cdc
