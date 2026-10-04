@@ -1,0 +1,38 @@
+name: CDC CI
+
+on:
+  push:
+    paths:
+      - 'rtl/dma_cdc.v'
+      - 'sim/tb/tb_dma_cdc.v'
+      - '.github/workflows/cdc-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/dma_cdc.v'
+      - 'sim/tb/tb_dma_cdc.v'
+      - '.github/workflows/cdc-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  cdc-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Compile CDC testbench
+        run: |
+          mkdir -p sim/build
+          iverilog -g2012 \
+            -o sim/build/tb_dma_cdc.vvp \
+            rtl/dma_cdc.v \
+            sim/tb/tb_dma_cdc.v
+
+      - name: Run CDC testbench
+        run: |
+          set -o pipefail
+          vvp sim/build/tb_dma_cdc.vvp | tee sim/build/tb_dma_cdc.log
+          grep -q "PASS tb_dma_cdc" sim/build/tb_dma_cdc.log
