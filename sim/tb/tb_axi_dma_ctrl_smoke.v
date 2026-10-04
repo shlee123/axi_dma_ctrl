@@ -284,12 +284,12 @@ module tb_axi_dma_ctrl_smoke;
             errors = errors + 1;
         end
 
-        // Final B response.
-        while (!m_dst_bready) begin
-            @(negedge axi_clk);
-            m_dst_bvalid = 1;
-            m_dst_bresp = 2'b00;
-        end
+        // Final B response. BVALID is independent of BREADY and remains
+        // asserted until the matching handshake completes.
+        @(negedge axi_clk);
+        m_dst_bvalid = 1;
+        m_dst_bresp = 2'b00;
+        while (!m_dst_bready) @(negedge axi_clk);
         @(posedge axi_clk);
         @(negedge axi_clk);
         m_dst_bvalid = 0;
