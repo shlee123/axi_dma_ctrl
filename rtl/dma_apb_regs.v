@@ -37,6 +37,7 @@ module dma_apb_regs #(
     localparam [APB_ADDR_WIDTH-1:0] ADDR_INTR   = {{(APB_ADDR_WIDTH-5){1'b0}},5'h10};
 
     reg irq_pending;
+    reg [3:0] status_image;
 
     wire apb_access;
     wire aligned;
@@ -91,7 +92,7 @@ module dma_apb_regs #(
                                   4'd0,
                                   cfg_length_minus_1};
                     ADDR_CTRL:
-                        prdata = {busy_pclk,27'd0,status_code_pclk};
+                        prdata = {busy_pclk,27'd0,status_image};
                     ADDR_INTR:
                         prdata = {31'd0,irq_pending};
                     default:
@@ -110,6 +111,7 @@ module dma_apb_regs #(
             cfg_target_single  <= 1'b0;
             start_pulse        <= 1'b0;
             irq_pending        <= 1'b0;
+            status_image       <= 4'h0;
         end else begin
             start_pulse <= 1'b0;
 
@@ -130,15 +132,18 @@ module dma_apb_regs #(
             end
 
             if (start_write) begin
-                start_pulse <= 1'b1;
-                irq_pending <= 1'b0;
+                start_pulse  <= 1'b1;
+                irq_pending  <= 1'b0;
+                status_image <= 4'h0;
             end
 
             // Set-dominant when clear and event coincide.
             if (irq_clear_write)
                 irq_pending <= 1'b0;
-            if (event_pulse_pclk)
-                irq_pending <= 1'b1;
+            if (event_pulse_pclk) begin
+                irq_pending  <= 1'b1;
+                status_image <= status_code_pclk;
+            end
         end
     end
 
