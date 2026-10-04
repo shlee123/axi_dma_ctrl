@@ -169,6 +169,15 @@ module tb_dma_apb_regs;
         end
 
         status_code_pclk = 4'h8;
+        // Accepted START owns a local APB-visible clear. Changing the CDC
+        // holding value alone must not change the software-visible status.
+        apb_read_check(12'h00C,32'h8000_0000,0);
+
+        // A new reliable event updates the APB-visible status image.
+        event_pulse_pclk = 1;
+        @(posedge pclk);
+        @(negedge pclk);
+        event_pulse_pclk = 0;
         apb_read_check(12'h00C,32'h8000_0008,0);
         busy_pclk = 0;
 
