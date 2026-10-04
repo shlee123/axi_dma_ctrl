@@ -107,9 +107,14 @@ module dma_read_engine #(
     assign rid_match = (m_axi_rid == AXI_ID_VALUE);
 
     // A mismatched RID is deliberately not accepted.
-    assign m_axi_rready = ((state == RD_R_DATA) || (state == RD_FAULT_DRAIN))
-                        && fifo_wr_ready
-                        && rid_match;
+    // During normal receive, FIFO capacity gates RREADY. Once the burst is
+    // permanently failed (response error/timeout/protocol drain), matching
+    // RID data is drain-only and must not be blocked by FIFO fullness.
+    assign m_axi_rready = rid_match &&
+                          (((state == RD_R_DATA) &&
+                            ((burst_failed || timeout_reported || rd_protocol_fault) ||
+                             fifo_wr_ready)) ||
+                           (state == RD_FAULT_DRAIN));
 
     assign r_accept = m_axi_rvalid && m_axi_rready;
     assign expected_last_beat = (burst_received_beats + 1'b1 == burst_expected_beats);
@@ -249,8 +254,8 @@ module dma_read_engine #(
                         burst_expected_beats <= planned_beats;
                         burst_received_beats <= 9'd0;
                         burst_stored_beats   <= 9'd0;
-                        burst_failed         <= 1'b0;
-                        timeout_reported     <= 1'b0;
+                        burst_failed         <= timeout_reported;
+                        timeout_reported     <= timeout_reported;
                         fault_missing_rlast  <= 1'b0;
                         timeout_count        <= {TIMEOUT_WIDTH{1'b0}};
                         fifo_burst_begin     <= 1'b1;
