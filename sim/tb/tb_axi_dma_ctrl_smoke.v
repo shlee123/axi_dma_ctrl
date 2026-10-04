@@ -6,9 +6,8 @@ module tb_axi_dma_ctrl_smoke;
     localparam AXI_ID_WIDTH   = 6;
 
     reg pclk;
-    reg preset_n;
+    reg reset_n;
     reg axi_clk;
-    reg axi_reset_n;
 
     reg psel;
     reg penable;
@@ -25,6 +24,11 @@ module tb_axi_dma_ctrl_smoke;
     wire [7:0] m_src_arlen;
     wire [2:0] m_src_arsize;
     wire [1:0] m_src_arburst;
+    wire [2:0] m_src_arprot;
+    wire [3:0] m_src_arcache;
+    wire m_src_arlock;
+    wire [3:0] m_src_arqos;
+    wire [3:0] m_src_arregion;
     wire m_src_arvalid;
     reg  m_src_arready;
 
@@ -40,6 +44,11 @@ module tb_axi_dma_ctrl_smoke;
     wire [7:0] m_dst_awlen;
     wire [2:0] m_dst_awsize;
     wire [1:0] m_dst_awburst;
+    wire [2:0] m_dst_awprot;
+    wire [3:0] m_dst_awcache;
+    wire m_dst_awlock;
+    wire [3:0] m_dst_awqos;
+    wire [3:0] m_dst_awregion;
     wire m_dst_awvalid;
     reg  m_dst_awready;
 
@@ -69,7 +78,7 @@ module tb_axi_dma_ctrl_smoke;
         .AXI_ID_VALUE(0)
     ) dut (
         .pclk(pclk),
-        .preset_n(preset_n),
+        .reset_n(reset_n),
         .psel(psel),
         .penable(penable),
         .pwrite(pwrite),
@@ -81,13 +90,17 @@ module tb_axi_dma_ctrl_smoke;
         .dma_irq(dma_irq),
 
         .axi_clk(axi_clk),
-        .axi_reset_n(axi_reset_n),
 
         .m_src_arid(m_src_arid),
         .m_src_araddr(m_src_araddr),
         .m_src_arlen(m_src_arlen),
         .m_src_arsize(m_src_arsize),
         .m_src_arburst(m_src_arburst),
+        .m_src_arprot(m_src_arprot),
+        .m_src_arcache(m_src_arcache),
+        .m_src_arlock(m_src_arlock),
+        .m_src_arqos(m_src_arqos),
+        .m_src_arregion(m_src_arregion),
         .m_src_arvalid(m_src_arvalid),
         .m_src_arready(m_src_arready),
 
@@ -103,6 +116,11 @@ module tb_axi_dma_ctrl_smoke;
         .m_dst_awlen(m_dst_awlen),
         .m_dst_awsize(m_dst_awsize),
         .m_dst_awburst(m_dst_awburst),
+        .m_dst_awprot(m_dst_awprot),
+        .m_dst_awcache(m_dst_awcache),
+        .m_dst_awlock(m_dst_awlock),
+        .m_dst_awqos(m_dst_awqos),
+        .m_dst_awregion(m_dst_awregion),
         .m_dst_awvalid(m_dst_awvalid),
         .m_dst_awready(m_dst_awready),
 
@@ -190,8 +208,7 @@ module tb_axi_dma_ctrl_smoke;
     initial begin
         pclk = 0;
         axi_clk = 0;
-        preset_n = 0;
-        axi_reset_n = 0;
+        reset_n = 0;
 
         psel = 0;
         penable = 0;
@@ -217,8 +234,19 @@ module tb_axi_dma_ctrl_smoke;
 
         repeat (4) @(posedge axi_clk);
         @(negedge axi_clk);
-        axi_reset_n = 1;
-        preset_n = 1;
+        reset_n = 1;
+        // Allow both domain reset synchronizers to deassert.
+        repeat (4) @(posedge axi_clk);
+        repeat (4) @(posedge pclk);
+
+        if (m_src_arprot !== 3'b000 || m_src_arcache !== 4'b0000 ||
+            m_src_arlock !== 1'b0 || m_src_arqos !== 4'b0000 ||
+            m_src_arregion !== 4'b0000 || m_dst_awprot !== 3'b000 ||
+            m_dst_awcache !== 4'b0000 || m_dst_awlock !== 1'b0 ||
+            m_dst_awqos !== 4'b0000 || m_dst_awregion !== 4'b0000) begin
+            $display("[%0t] ERROR AXI sideband defaults", $time);
+            errors = errors + 1;
+        end
 
         // Program 16-byte transfer.
         apb_write(12'h000,32'h0000_1000);
