@@ -17,7 +17,8 @@ TESTS := \
 	tb_dma_cdc \
 	tb_dma_apb_regs \
 	tb_axi_dma_ctrl_smoke \
-	tb_axi_dma_ctrl_matrix
+	tb_axi_dma_ctrl_matrix \
+	tb_axi_dma_ctrl_error_matrix
 
 RTL_ALL := \
 	$(RTL_DIR)/dma_reset_sync.v \
@@ -64,6 +65,9 @@ define TB_RTL_tb_axi_dma_ctrl_smoke
 $(RTL_ALL)
 endef
 define TB_RTL_tb_axi_dma_ctrl_matrix
+$(RTL_ALL)
+endef
+define TB_RTL_tb_axi_dma_ctrl_error_matrix
 $(RTL_ALL)
 endef
 
