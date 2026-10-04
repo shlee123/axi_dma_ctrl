@@ -86,6 +86,7 @@ module dma_read_engine #(
     reg [8:0] planned_beats;
     reg [8:0] burst_expected_beats;
     reg [8:0] burst_received_beats;
+    reg [8:0] burst_stored_beats;
     reg       burst_failed;
     reg       timeout_reported;
     reg       fault_missing_rlast;
@@ -172,6 +173,7 @@ module dma_read_engine #(
             planned_beats          <= 9'd0;
             burst_expected_beats   <= 9'd0;
             burst_received_beats   <= 9'd0;
+            burst_stored_beats     <= 9'd0;
             burst_failed           <= 1'b0;
             timeout_reported       <= 1'b0;
             fault_missing_rlast    <= 1'b0;
@@ -241,6 +243,7 @@ module dma_read_engine #(
                         m_axi_arvalid        <= 1'b0;
                         burst_expected_beats <= planned_beats;
                         burst_received_beats <= 9'd0;
+                        burst_stored_beats   <= 9'd0;
                         burst_failed         <= 1'b0;
                         timeout_reported     <= 1'b0;
                         fault_missing_rlast  <= 1'b0;
@@ -249,7 +252,7 @@ module dma_read_engine #(
 
                         next_addr <= next_addr + (planned_beats * BYTES_PER_BEAT);
                         state     <= RD_R_DATA;
-                    end else if (AXI_TIMEOUT_CYCLES != 0) begin
+                    end else if ((AXI_TIMEOUT_CYCLES != 0) && !timeout_reported) begin
                         if (timeout_count == AXI_TIMEOUT_CYCLES-1) begin
                             rd_error_valid    <= 1'b1;
                             rd_error_code     <= `DMA_STATUS_SRC_TIMEOUT;
@@ -257,7 +260,7 @@ module dma_read_engine #(
                             timeout_count     <= timeout_count;
                             // ARVALID cannot be withdrawn after timeout.
                             // Wait for handshake, then drain the accepted burst.
-                        end else if (!timeout_reported) begin
+                        end else begin
                             timeout_count <= timeout_count + 1'b1;
                         end
                     end
@@ -272,6 +275,8 @@ module dma_read_engine #(
                     if (r_accept) begin
                         timeout_count        <= {TIMEOUT_WIDTH{1'b0}};
                         burst_received_beats <= burst_received_beats + 1'b1;
+                        if (!burst_failed && !timeout_reported && !rd_protocol_fault)
+                            burst_stored_beats <= burst_stored_beats + 1'b1;
 
                         if (rresp_bad && !burst_failed) begin
                             burst_failed   <= 1'b1;
@@ -321,7 +326,7 @@ module dma_read_engine #(
                 RD_FINALIZE: begin
                     if (burst_failed || timeout_reported || rd_protocol_fault) begin
                         fifo_discard_valid <= 1'b1;
-                        fifo_discard_beats <= burst_received_beats[FIFO_COUNT_WIDTH-1:0];
+                        fifo_discard_beats <= burst_stored_beats[FIFO_COUNT_WIDTH-1:0];
                         state              <= RD_HALT;
                     end else begin
                         fifo_commit_valid <= 1'b1;
