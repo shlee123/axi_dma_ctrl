@@ -1,0 +1,40 @@
+name: Controller CI
+
+on:
+  push:
+    paths:
+      - 'rtl/dma_ctrl.v'
+      - 'rtl/dma_defines.vh'
+      - 'sim/tb/tb_dma_ctrl.v'
+      - '.github/workflows/controller-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/dma_ctrl.v'
+      - 'rtl/dma_defines.vh'
+      - 'sim/tb/tb_dma_ctrl.v'
+      - '.github/workflows/controller-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  controller-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Compile controller testbench
+        run: |
+          mkdir -p sim/build
+          iverilog -g2012 -I rtl \
+            -o sim/build/tb_dma_ctrl.vvp \
+            rtl/dma_ctrl.v \
+            sim/tb/tb_dma_ctrl.v
+
+      - name: Run controller testbench
+        run: |
+          set -o pipefail
+          vvp sim/build/tb_dma_ctrl.vvp | tee sim/build/tb_dma_ctrl.log
+          grep -q "PASS tb_dma_ctrl" sim/build/tb_dma_ctrl.log
