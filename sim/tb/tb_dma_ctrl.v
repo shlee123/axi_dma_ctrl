@@ -45,6 +45,7 @@ module tb_dma_ctrl;
     wire dma_busy;
     wire [3:0] dma_status_code;
     wire event_valid;
+    reg event_ready;
     wire [3:0] event_status;
 
     integer errors;
@@ -95,6 +96,7 @@ module tb_dma_ctrl;
         .dma_busy(dma_busy),
         .dma_status_code(dma_status_code),
         .event_valid(event_valid),
+        .event_ready(event_ready),
         .event_status(event_status)
     );
 
@@ -183,6 +185,7 @@ module tb_dma_ctrl;
         event_count = 0;
         flush_count = 0;
         last_event_status = 0;
+        event_ready = 1;
 
         repeat (3) @(posedge clk);
         @(negedge clk);
