@@ -25,7 +25,8 @@ jobs:
       - name: Compile smoke test
         run: |
           mkdir -p sim/build
-          iverilog -g2012 -I rtl -s tb_axi_dma_ctrl_smoke             -o sim/build/tb_axi_dma_ctrl_smoke.vvp             rtl/dma_data_fifo.v             rtl/dma_read_engine.v             rtl/dma_write_engine.v             rtl/dma_ctrl.v             rtl/dma_cdc.v             rtl/dma_apb_regs.v             rtl/axi_dma_ctrl.v             sim/tb/tb_axi_dma_ctrl_smoke.v
+          iverilog -g2012 -I rtl -s tb_axi_dma_ctrl_smoke             -o sim/build/tb_axi_dma_ctrl_smoke.vvp             rtl/dma_reset_sync.v \
+            rtl/dma_data_fifo.v             rtl/dma_read_engine.v             rtl/dma_write_engine.v             rtl/dma_ctrl.v             rtl/dma_cdc.v             rtl/dma_apb_regs.v             rtl/axi_dma_ctrl.v             sim/tb/tb_axi_dma_ctrl_smoke.v
       - name: Run smoke test
         run: |
           set -o pipefail
