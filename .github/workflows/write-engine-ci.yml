@@ -1,0 +1,40 @@
+name: Write Engine CI
+
+on:
+  push:
+    paths:
+      - 'rtl/dma_write_engine.v'
+      - 'rtl/dma_defines.vh'
+      - 'sim/tb/tb_dma_write_engine.v'
+      - '.github/workflows/write-engine-ci.yml'
+  pull_request:
+    paths:
+      - 'rtl/dma_write_engine.v'
+      - 'rtl/dma_defines.vh'
+      - 'sim/tb/tb_dma_write_engine.v'
+      - '.github/workflows/write-engine-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  write-engine-sim:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+
+      - name: Compile write-engine testbench
+        run: |
+          mkdir -p sim/build
+          iverilog -g2012 -I rtl \
+            -o sim/build/tb_dma_write_engine.vvp \
+            rtl/dma_write_engine.v \
+            sim/tb/tb_dma_write_engine.v
+
+      - name: Run write-engine testbench
+        run: |
+          set -o pipefail
+          vvp sim/build/tb_dma_write_engine.vvp | tee sim/build/tb_dma_write_engine.log
+          grep -q "PASS tb_dma_write_engine" sim/build/tb_dma_write_engine.log
