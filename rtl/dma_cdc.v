@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module dma_cdc #(
     parameter integer AXI_ADDR_WIDTH = 32
 )(
