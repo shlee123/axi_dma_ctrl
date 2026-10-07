@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module dma_data_fifo #(
     parameter integer DATA_WIDTH      = 32,
     parameter integer DEPTH           = 8,
