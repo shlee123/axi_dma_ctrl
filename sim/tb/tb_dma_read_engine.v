@@ -103,7 +103,10 @@ module tb_dma_read_engine;
 
     always #5 clk = ~clk;
 
+    // Sample DUT outputs after the NBA update at the clock edge.
+    // rd_error_valid/rd_done are one-cycle registered pulses.
     always @(posedge clk) begin
+        #1;
         if (fifo_commit_valid) begin
             commit_seen = commit_seen + 1;
         end
