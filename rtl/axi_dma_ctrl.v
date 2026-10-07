@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module axi_dma_ctrl #(
     parameter integer APB_ADDR_WIDTH      = 12,
     parameter integer AXI_ADDR_WIDTH      = 32,
