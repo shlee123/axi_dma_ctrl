@@ -30,13 +30,14 @@ RTL_ALL := \
 	$(RTL_DIR)/dma_apb_regs.v \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
-.PHONY: help dirs regression clean coverage-clean coverage-merge $(TESTS)
+.PHONY: help dirs regression run_verdi clean coverage-clean coverage-merge $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
 	@echo "  make SIMULATOR=iverilog regression"
 	@echo "  make SIMULATOR=vcs regression"
 	@echo "  make SIMULATOR=vcs TEST=tb_axi_dma_ctrl_smoke run"
+	@echo "  make TEST=tb_axi_dma_ctrl_smoke run_verdi"
 	@echo "  make coverage-merge"
 	@echo "SIMULATOR defaults to vcs."
 
@@ -111,11 +112,13 @@ run-vcs: dirs
 	vcs $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
+		+define+ENABLE_FSDB \
 		-o $(BUILD_DIR)/simv_$(TEST) \
 		$$rtl_files $(TB_DIR)/$(TEST).v \
 		-l $(LOG_DIR)/$(TEST)_vcs_compile.log
 	@set -o pipefail; \
 	$(BUILD_DIR)/simv_$(TEST) $(VCS_RUN_OPTS) \
+		+FSDB_FILE=$(FSDB_DIR)/$(TEST).fsdb \
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		-l $(LOG_DIR)/$(TEST)_vcs_run.log | tee $(LOG_DIR)/$(TEST)_vcs_stdout.log; \
@@ -123,6 +126,11 @@ run-vcs: dirs
 
 coverage-merge: dirs
 	@./script/vcs_coverage_merge.sh
+
+run_verdi: dirs
+	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
+	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
+	@verdi -nologo -ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 coverage-clean:
 	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report

@@ -307,6 +307,19 @@ module tb_axi_dma_ctrl_error_matrix;
         end
     endtask
 
+
+    // Optional FSDB dump stub.
+    // Enabled by the VCS Makefile flow with +define+ENABLE_FSDB.
+`ifdef ENABLE_FSDB
+    reg [1023:0] fsdb_file;
+    initial begin
+        if (!$value$plusargs("FSDB_FILE=%s", fsdb_file))
+            fsdb_file = "fsdb/default.fsdb";
+        $fsdbDumpfile(fsdb_file);
+        $fsdbDumpvars(0, tb_axi_dma_ctrl_error_matrix);
+    end
+`endif
+
     initial begin
         pclk = 0;
         axi_clk = 0;

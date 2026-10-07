@@ -205,6 +205,19 @@ module tb_axi_dma_ctrl_smoke;
     reg [31:0] ctrl_read;
     integer timeout_guard;
 
+
+    // Optional FSDB dump stub.
+    // Enabled by the VCS Makefile flow with +define+ENABLE_FSDB.
+`ifdef ENABLE_FSDB
+    reg [1023:0] fsdb_file;
+    initial begin
+        if (!$value$plusargs("FSDB_FILE=%s", fsdb_file))
+            fsdb_file = "fsdb/default.fsdb";
+        $fsdbDumpfile(fsdb_file);
+        $fsdbDumpvars(0, tb_axi_dma_ctrl_smoke);
+    end
+`endif
+
     initial begin
         pclk = 0;
         axi_clk = 0;
