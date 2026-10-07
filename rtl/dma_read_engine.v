@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 `include "dma_defines.vh"
 
 module dma_read_engine #(
