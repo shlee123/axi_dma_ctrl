@@ -108,7 +108,7 @@ VCS_RUN_OPTS ?=
 
 run-vcs: dirs
 	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
-	vcs $(VCS_OPTS) -I$(RTL_DIR) -top $(TEST) \
+	vcs $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		-o $(BUILD_DIR)/simv_$(TEST) \
