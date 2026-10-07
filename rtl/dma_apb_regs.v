@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module dma_apb_regs #(
     parameter integer APB_ADDR_WIDTH = 12
 )(
