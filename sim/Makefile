@@ -77,12 +77,30 @@ define run_test
 endef
 
 regression: dirs
-	@set -e; \
+	@set +e; \
+	pass_list=""; \
+	fail_list=""; \
+	fail_count=0; \
 	for t in $(TESTS); do \
 		echo "===== $$t ====="; \
-		$(MAKE) --no-print-directory TEST=$$t run; \
-	done
-	@echo "PASS regression"
+		if $(MAKE) --no-print-directory TEST=$$t run; then \
+			pass_list="$$pass_list $$t"; \
+		else \
+			fail_list="$$fail_list $$t"; \
+			fail_count=$$(($$fail_count+1)); \
+		fi; \
+	done; \
+	echo; \
+	echo "===== REGRESSION STATUS ====="; \
+	for t in $$pass_list; do echo "PASS: $$t"; done; \
+	for t in $$fail_list; do echo "FAIL: $$t"; done; \
+	if [ $$fail_count -eq 0 ]; then \
+		echo "REGRESSION PASS"; \
+		exit 0; \
+	else \
+		echo "REGRESSION FAIL: $$fail_count test(s) failed"; \
+		exit 1; \
+	fi
 
 run: dirs
 	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
@@ -123,7 +141,19 @@ run-vcs: dirs
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		-l $(LOG_DIR)/$(TEST)_vcs_run.log | tee $(LOG_DIR)/$(TEST)_vcs_stdout.log; \
-	grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_vcs_run.log
+	rc=$?; \
+	if [ $rc -ne 0 ]; then \
+		echo "===== FAIL $(TEST): VCS runtime exit=$rc ====="; \
+		echo "See: $(LOG_DIR)/$(TEST)_vcs_run.log"; \
+		exit $rc; \
+	fi; \
+	if grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_vcs_run.log; then \
+		echo "===== PASS $(TEST) ====="; \
+	else \
+		echo "===== FAIL $(TEST): PASS marker not found ====="; \
+		echo "See: $(LOG_DIR)/$(TEST)_vcs_run.log"; \
+		exit 1; \
+	fi
 
 coverage-merge: dirs
 	@./script/vcs_coverage_merge.sh
