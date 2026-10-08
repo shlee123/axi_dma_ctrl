@@ -245,6 +245,7 @@ module tb_dma_ctrl;
         @(negedge clk);
         fifo_verified_count = 0;
         wait_cycles(3);
+        @(negedge clk);
 
         if (last_event_status !== 4'h0 || dma_busy !== 1'b0) begin
             $display("[%0t] ERROR TEST2 completion status=%h busy=%b",
@@ -292,6 +293,7 @@ module tb_dma_ctrl;
         wr_busy = 0;
         fifo_reserved_count = 0;
         wait_cycles(2);
+        @(negedge clk);
 
         if (flush_count == 0 || dma_busy) begin
             $display("[%0t] ERROR TEST3 recovery flush=%0d busy=%b",
