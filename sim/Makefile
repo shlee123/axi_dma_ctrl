@@ -106,6 +106,7 @@ run-iverilog: dirs
 VCS_CM ?= line+cond+fsm+tgl+branch
 VCS_OPTS ?= -full64 -sverilog -debug_access+all
 VCS_RUN_OPTS ?=
+VERDI_OPTS ?= -nologo -sv
 
 run-vcs: dirs
 	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
@@ -129,8 +130,12 @@ coverage-merge: dirs
 
 run_verdi: dirs
 	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
+	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
-	@verdi -nologo -ssf $(FSDB_DIR)/$(TEST).fsdb &
+	@verdi $(VERDI_OPTS) +incdir+$(RTL_DIR) +define+ENABLE_FSDB \
+		-top $(TEST) \
+		$($(addprefix TB_RTL_,$(TEST))) $(TB_DIR)/$(TEST).v \
+		-ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 coverage-clean:
 	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report
