@@ -15,6 +15,12 @@ name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as f:
     f.write(name + " " + " ".join(args) + "\n")
+if name == "vcs" and "-ID" in args:
+    print(os.environ.get("VCS_VERSION", "V-2023.12-SP2-6"))
+    sys.exit(0)
+if name == "urg" and "-version" in args:
+    print(os.environ.get("URG_VERSION", "V-2023.12-SP2-6"))
+    sys.exit(0)
 if name in ("vcs", "iverilog"):
     rc = int(os.environ.get("COMPILE_RC", "0"))
     if rc: sys.exit(rc)
@@ -45,7 +51,7 @@ class MakefileSmoke(unittest.TestCase):
         bin_dir.mkdir()
         self.env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
                         CALLS=str(self.root / "calls"), STUB_RC="0", STUB_PASS="1")
-        for name in ("vcs", "verdi", "iverilog", "vvp"):
+        for name in ("vcs", "urg", "verdi", "iverilog", "vvp"):
             p = bin_dir / name
             p.write_text(STUB)
             p.chmod(0o755)
@@ -164,6 +170,21 @@ class MakefileSmoke(unittest.TestCase):
         r = self.run_make("coverage-merge")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.calls(), ["coverage"])
+
+    def test_coverage_tools_require_requested_release(self):
+        r = self.run_make("coverage-tools-check")
+        self.assert_ok(r)
+        self.assertIn("Synopsys tools verified: V-2023.12-SP2-6", r.stdout)
+        self.assertEqual([c.split()[0] for c in self.calls()], ["vcs", "urg"])
+
+        for variable in ("VCS_VERSION", "URG_VERSION"):
+            with self.subTest(variable=variable):
+                self.clear_calls()
+                self.env[variable] = "V-2022.06"
+                r = self.run_make("coverage-tools-check")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("expected", r.stdout)
+                self.env.pop(variable)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

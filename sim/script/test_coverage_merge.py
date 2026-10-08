@@ -14,6 +14,9 @@ STUB = r"""#!/usr/bin/env python3
 import json, os, pathlib, sys
 a = sys.argv[1:]
 root = pathlib.Path(__file__).parent
+if a == ["-version"]:
+    print("V-2022.06" if (root / "bad-version").exists() else "URG V-2023.12-SP2-6")
+    sys.exit(0)
 with (root / "calls.jsonl").open("a") as f: f.write(json.dumps(a) + "\n")
 if (root / "fail").exists(): print("Error-[TEST] rejected"); sys.exit(3)
 if (root / "warn").exists(): print("Warning-[TEST] instance ignored")
@@ -98,6 +101,14 @@ class CoverageMergeTests(unittest.TestCase):
         self.urg.unlink()
         with self.assertRaisesRegex(RuntimeError, "not found"): self.run_merge()
         self.assert_preserved()
+
+    def test_wrong_urg_version_preserves_report(self):
+        self.old_output()
+        (self.root / "bad-version").touch()
+        with self.assertRaisesRegex(RuntimeError, "Expected URG V-2023.12-SP2-6"):
+            self.run_merge()
+        self.assert_preserved()
+        self.assertFalse((self.root / "calls.jsonl").exists())
 
     def test_tool_error_preserves_report_and_log(self):
         self.old_output()
