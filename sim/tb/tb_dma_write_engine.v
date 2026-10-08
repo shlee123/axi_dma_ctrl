@@ -108,9 +108,18 @@ module tb_dma_write_engine;
 
     always #5 clk = ~clk;
 
+    // Sample the reservation handshake before the DUT's NBA updates clear
+    // fifo_reserve_valid at the accepting edge.
     always @(posedge clk) begin
         if (fifo_reserve_valid && fifo_reserve_ready)
             reserve_seen = reserve_seen + 1;
+    end
+
+    // Sample registered one-cycle DUT pulses after the NBA update.  Keeping
+    // this separate from the handshake monitor avoids active-region races
+    // with the stimulus checks.
+    always @(posedge clk) begin
+        #1;
         if (fifo_release_valid)
             release_seen = release_seen + 1;
         if (wr_done)
