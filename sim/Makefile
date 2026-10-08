@@ -132,10 +132,9 @@ run_verdi: dirs
 	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
-	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
-	verdi $(VERDI_OPTS) +incdir+$(RTL_DIR) +define+ENABLE_FSDB \
+	@verdi $(VERDI_OPTS) +incdir+$(RTL_DIR) +define+ENABLE_FSDB \
 		-top $(TEST) \
-		$rtl_files $(TB_DIR)/$(TEST).v \
+		$($(addprefix TB_RTL_,$(TEST))) $(TB_DIR)/$(TEST).v \
 		-ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 coverage-clean:
