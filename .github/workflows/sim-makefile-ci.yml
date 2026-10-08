@@ -1,0 +1,38 @@
+name: Simulation Makefile CI
+
+on:
+  pull_request:
+    paths:
+      - 'sim/Makefile'
+      - 'sim/script/*'
+      - '.github/workflows/sim-makefile-ci.yml'
+  push:
+    paths:
+      - 'sim/Makefile'
+      - 'sim/script/*'
+      - '.github/workflows/sim-makefile-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  makefile-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise selection, tool dispatch, and failure propagation
+        run: python3 sim/script/test_makefile.py
+  interactive-rtl-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Run interactive end-to-end smoke through Makefile
+        working-directory: sim
+        run: |
+          set -o pipefail
+          printf '7\n' | make SIMULATOR=iverilog run
