@@ -6,7 +6,15 @@ must be verified with the installed Synopsys tools.
 
 ## Run
 
-From sim, using VDBs collected from the same RTL revision and tool environment:
+From `sim`, a clean end-to-end run is:
+
+```bash
+make coverage
+```
+
+This verifies VCS and URG are `V-2023.12-SP2-6`, removes stale coverage,
+collects all nine VDBs, validates every mapping path, performs the staged merge,
+and creates the final report. To run the phases separately:
 
 ```bash
 make coverage-map-check
@@ -24,6 +32,16 @@ make coverage-merge
 Python 3 and urg must be in PATH. All nine configured test databases under
 coverage/vdb are required. Unlisted VDBs are not merged. Do not mix stale RTL
 coverage with the current run.
+
+Open the merged database with:
+
+```bash
+make coverage-verdi
+```
+
+`SYNOPSYS_VERSION`, `VCS`, and `URG` are Makefile overrides for an intentional
+tool-path or release change. The default supported release remains
+`V-2023.12-SP2-6`.
 
 Outputs:
 
