@@ -137,6 +137,18 @@ After adding/fixing patterns, rerun any required tests and merge all current dat
 make coverage-merge
 ```
 
+For a clean end-to-end VCS/URG run using VCS/URG `V-2023.12-SP2-6`:
+
+```text
+make coverage
+```
+
+The merge uses `tb_axi_dma_ctrl_smoke.dut` as the canonical top hierarchy.
+Coverage from the other top-level tests is mapped to that DUT, while coverage
+from the six unit tests is instance-mapped to the matching submodule below the
+canonical DUT. Run `make coverage-dry-run` to inspect the generated map and URG
+command before using a licensed tool.
+
 Merged database:
 
 ```text

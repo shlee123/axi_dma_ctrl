@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / "Makefile"
+MERGE_SCRIPT = Path(__file__).resolve().parent / "vcs_coverage_merge.sh"
 TEST = "tb_dma_data_fifo"
 STUB = r"""#!/usr/bin/env python3
 import os, pathlib, sys
@@ -15,6 +16,9 @@ name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 with open(os.environ["CALLS"], "a") as f:
     f.write(name + " " + " ".join(args) + "\n")
+if name == "vcs" and "-ID" in args:
+    print(os.environ.get("TOOL_VERSION", "V-2023.12-SP2-6"))
+    sys.exit(0)
 if name in ("vcs", "iverilog"):
     rc = int(os.environ.get("COMPILE_RC", "0"))
     if rc: sys.exit(rc)
@@ -164,6 +168,61 @@ class MakefileSmoke(unittest.TestCase):
         r = self.run_make("coverage-merge")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(self.calls(), ["coverage"])
+
+    def test_coverage_dry_run_generates_complete_instance_map(self):
+        (self.root / "script").mkdir()
+        shutil.copyfile(MERGE_SCRIPT, self.root / "script" / MERGE_SCRIPT.name)
+        r = self.run_make("coverage-dry-run")
+        self.assert_ok(r)
+        map_text = (self.root / "coverage" / "axi_dma_ctrl.map").read_text()
+        expected = {
+            "tb_axi_dma_ctrl_matrix.dut: tb_axi_dma_ctrl_smoke.dut",
+            "tb_axi_dma_ctrl_error_matrix.dut: tb_axi_dma_ctrl_smoke.dut",
+            "tb_dma_data_fifo.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_data_fifo",
+            "tb_dma_read_engine.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_read_engine",
+            "tb_dma_write_engine.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_write_engine",
+            "tb_dma_ctrl.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_ctrl",
+            "tb_dma_cdc.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_cdc",
+            "tb_dma_apb_regs.dut: tb_axi_dma_ctrl_smoke.dut.u_dma_apb_regs",
+        }
+        self.assertEqual({line for line in map_text.splitlines()
+                          if line and not line.startswith("#")}, expected)
+        self.assertIn("-mapfile coverage/axi_dma_ctrl.map", r.stdout)
+        self.assertIn("-dbname coverage/merged.vdb", r.stdout)
+        self.assertIn("-report coverage/report", r.stdout)
+
+    def test_coverage_check_requires_all_nine_vdbs(self):
+        (self.root / "script").mkdir()
+        shutil.copyfile(MERGE_SCRIPT, self.root / "script" / MERGE_SCRIPT.name)
+        r = self.run_make("coverage-check")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("9 required coverage databases are missing", r.stdout)
+
+        tests = (
+            "tb_dma_data_fifo tb_dma_read_engine tb_dma_write_engine "
+            "tb_dma_ctrl tb_dma_cdc tb_dma_apb_regs "
+            "tb_axi_dma_ctrl_smoke tb_axi_dma_ctrl_matrix "
+            "tb_axi_dma_ctrl_error_matrix"
+        ).split()
+        for test in tests:
+            (self.root / "coverage" / "vdb" / (test + ".vdb")).mkdir()
+        r = self.run_make("coverage-check")
+        self.assert_ok(r)
+        self.assertIn("Coverage inputs complete: 9 VDBs", r.stdout)
+
+    def test_coverage_run_checks_vcs_version(self):
+        r = self.run_make("coverage-run", "TESTS=" + TEST)
+        self.assert_ok(r)
+        self.assertEqual([c.split()[0] for c in self.calls()],
+                         ["vcs", "vcs", "simv_" + TEST])
+        self.assertIn("VCS version: V-2023.12-SP2-6", r.stdout)
+
+        self.clear_calls()
+        self.env["TOOL_VERSION"] = "V-2022.06"
+        r = self.run_make("coverage-run", "TESTS=" + TEST)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("expected VCS V-2023.12-SP2-6", r.stdout)
+        self.assertEqual([c.split()[0] for c in self.calls()], ["vcs"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

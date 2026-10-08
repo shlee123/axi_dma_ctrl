@@ -20,6 +20,19 @@ TESTS := \
 	tb_axi_dma_ctrl_matrix \
 	tb_axi_dma_ctrl_error_matrix
 
+UNIT_TESTS := \
+	tb_dma_data_fifo \
+	tb_dma_read_engine \
+	tb_dma_write_engine \
+	tb_dma_ctrl \
+	tb_dma_cdc \
+	tb_dma_apb_regs
+
+TOP_TESTS := \
+	tb_axi_dma_ctrl_smoke \
+	tb_axi_dma_ctrl_matrix \
+	tb_axi_dma_ctrl_error_matrix
+
 RTL_ALL := \
 	$(RTL_DIR)/dma_reset_sync.v \
 	$(RTL_DIR)/dma_data_fifo.v \
@@ -30,7 +43,9 @@ RTL_ALL := \
 	$(RTL_DIR)/dma_apb_regs.v \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
-.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean coverage-clean coverage-merge $(TESTS)
+.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean \
+	coverage coverage-run coverage-check coverage-dry-run coverage-clean \
+	coverage-merge coverage-verdi $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -40,7 +55,12 @@ help:
 	@echo "  make run_verdi                        # interactive Verdi selection"
 	@echo "  make SIMULATOR=vcs TEST=tb_axi_dma_ctrl_smoke run"
 	@echo "  make TEST=tb_axi_dma_ctrl_smoke run_verdi"
-	@echo "  make coverage-merge"
+	@echo "  make coverage                         # clean, run all VCS tests, merge"
+	@echo "  make coverage-run                     # run all tests and retain current VDBs"
+	@echo "  make coverage-check                   # verify all nine VDB inputs"
+	@echo "  make coverage-dry-run                 # show URG command and instance map"
+	@echo "  make coverage-merge                   # create merged.vdb and HTML report"
+	@echo "  make coverage-verdi                   # open merged coverage in Verdi"
 	@echo "SIMULATOR defaults to vcs."
 
 dirs:
@@ -150,13 +170,21 @@ run-iverilog: dirs
 	grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_iverilog.log
 
 VCS_CM ?= line+cond+fsm+tgl+branch
+VCS ?= vcs
 VCS_OPTS ?= -full64 -sverilog -debug_access+all -kdb
 VCS_RUN_OPTS ?=
 VERDI_OPTS ?= -nologo -sv
+URG ?= urg
+URG_OPTS ?= -full64
+VCS_EXPECTED_VERSION ?= V-2023.12-SP2-6
+URG_EXPECTED_VERSION ?= V-2023.12-SP2-6
+COV_BASE_TEST ?= tb_axi_dma_ctrl_smoke
+COV_MAP_FILE ?= $(COV_DIR)/axi_dma_ctrl.map
+COV_ELFILE ?=
 
 run-vcs: dirs
 	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
-	vcs $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
+	$(VCS) $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		+define+ENABLE_FSDB \
@@ -183,8 +211,55 @@ run-vcs: dirs
 		exit 1; \
 	fi
 
+coverage:
+	@$(MAKE) --no-print-directory coverage-clean
+	@$(MAKE) --no-print-directory coverage-run
+	@$(MAKE) --no-print-directory coverage-merge
+
+coverage-run: dirs
+	@version_output="$$( $(VCS) -ID 2>&1 || true )"; \
+	if [[ "$$version_output" != *"$(VCS_EXPECTED_VERSION)"* ]]; then \
+		echo "ERROR: expected VCS $(VCS_EXPECTED_VERSION)"; \
+		echo "Detected: $${version_output:-<no version output>}"; \
+		exit 2; \
+	fi; \
+	echo "VCS version: $(VCS_EXPECTED_VERSION)"
+	@$(MAKE) --no-print-directory SIMULATOR=vcs regression
+
+coverage-check: dirs
+	@COV_DIR="$(COV_DIR)" \
+		COV_BASE_TEST="$(COV_BASE_TEST)" \
+		COV_UNIT_TESTS="$(UNIT_TESTS)" \
+		COV_TOP_TESTS="$(TOP_TESTS)" \
+		bash ./script/vcs_coverage_merge.sh --check-only
+
+coverage-dry-run: dirs
+	@COV_DIR="$(COV_DIR)" \
+		COV_BASE_TEST="$(COV_BASE_TEST)" \
+		COV_UNIT_TESTS="$(UNIT_TESTS)" \
+		COV_TOP_TESTS="$(TOP_TESTS)" \
+		COV_MAP_FILE="$(COV_MAP_FILE)" \
+		COV_ELFILE="$(COV_ELFILE)" \
+		URG="$(URG)" URG_OPTS="$(URG_OPTS)" \
+		URG_EXPECTED_VERSION="$(URG_EXPECTED_VERSION)" \
+		bash ./script/vcs_coverage_merge.sh --dry-run
+
 coverage-merge: dirs
-	@bash ./script/vcs_coverage_merge.sh
+	@COV_DIR="$(COV_DIR)" \
+		COV_BASE_TEST="$(COV_BASE_TEST)" \
+		COV_UNIT_TESTS="$(UNIT_TESTS)" \
+		COV_TOP_TESTS="$(TOP_TESTS)" \
+		COV_MAP_FILE="$(COV_MAP_FILE)" \
+		COV_ELFILE="$(COV_ELFILE)" \
+		URG="$(URG)" URG_OPTS="$(URG_OPTS)" \
+		URG_EXPECTED_VERSION="$(URG_EXPECTED_VERSION)" \
+		bash ./script/vcs_coverage_merge.sh
+
+coverage-verdi:
+	@if [ ! -d "$(COV_DIR)/merged.vdb" ]; then \
+		echo "ERROR: missing $(COV_DIR)/merged.vdb; run make coverage-merge first"; exit 2; \
+	fi
+	@verdi -cov -covdir $(COV_DIR)/merged.vdb &
 
 run_verdi: dirs
 ifeq ($(strip $(TEST)),)
@@ -200,7 +275,7 @@ else
 endif
 
 coverage-clean:
-	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report
+	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report $(COV_MAP_FILE)
 	@mkdir -p $(COV_DIR)/vdb $(COV_DIR)/report
 
 clean:
