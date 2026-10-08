@@ -30,7 +30,7 @@ RTL_ALL := \
 	$(RTL_DIR)/dma_apb_regs.v \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
-.PHONY: help dirs regression run_verdi clean coverage-clean coverage-merge $(TESTS)
+.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean coverage-clean coverage-merge $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -104,25 +104,31 @@ regression: dirs
 		exit 1; \
 	fi
 
+# Keep interactive dispatch separate from explicit TEST recipes: each recipe
+# line runs in its own shell, so shell exit cannot skip later recipe lines.
+define select_test
+	@echo "Available regression patterns:"; \
+	i=1; \
+	for t in $(TESTS); do \
+		printf "  %2d) %s\n" $$i $$t; \
+		i=$$(($$i+1)); \
+	done; \
+	printf "Select pattern [1-$(words $(TESTS))]: "; \
+	if ! read -r choice; then echo "ERROR: no selection received"; exit 2; fi; \
+	selected=""; i=1; \
+	for t in $(TESTS); do \
+		if [ "$$choice" = "$$i" ]; then selected=$$t; break; fi; \
+		i=$$(($$i+1)); \
+	done; \
+	if [ -z "$$selected" ]; then echo "ERROR: invalid selection '$$choice'"; exit 2; fi; \
+	echo "Selected: $$selected"; \
+	$(MAKE) --no-print-directory SIMULATOR=$(SIMULATOR) TEST=$$selected $(1)
+endef
+
 run: dirs
-	@if [ -z "$(TEST)" ]; then \
-		echo "Available regression patterns:"; \
-		i=1; \
-		for t in $(TESTS); do \
-			printf "  %2d) %s\\n" $$i $$t; \
-			i=$$(($$i+1)); \
-		done; \
-		printf "Select pattern [1-$(words $(TESTS))]: "; \
-		read choice; \
-		case "$$choice" in ""|*[!0-9]*) echo "ERROR: invalid selection '$$choice'"; exit 2;; esac; \
-		if [ $$choice -lt 1 ] || [ $$choice -gt $(words $(TESTS)) ]; then \
-			echo "ERROR: selection out of range: $$choice"; exit 2; \
-		fi; \
-		selected=$$(printf "%s\\n" $(TESTS) | sed -n "$$choice"p); \
-		echo "Selected: $$selected"; \
-		$(MAKE) --no-print-directory SIMULATOR=$(SIMULATOR) TEST=$$selected run; \
-		exit $$?; \
-	fi
+ifeq ($(strip $(TEST)),)
+	$(call select_test,run)
+else
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ "$(SIMULATOR)" = "iverilog" ]; then \
 		$(MAKE) --no-print-directory run-iverilog TEST=$(TEST); \
@@ -132,12 +138,15 @@ run: dirs
 		echo "ERROR: unsupported SIMULATOR=$(SIMULATOR)"; exit 2; \
 	fi
 
+endif
+
 run-iverilog: dirs
 	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
 	iverilog -g2012 -I $(RTL_DIR) -s $(TEST) \
 		-o $(BUILD_DIR)/$(TEST).vvp $$rtl_files $(TB_DIR)/$(TEST).v
 	@set -o pipefail; \
 	vvp $(BUILD_DIR)/$(TEST).vvp | tee $(LOG_DIR)/$(TEST)_iverilog.log; \
+	rc=$$?; if [ $$rc -ne 0 ]; then exit $$rc; fi; \
 	grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_iverilog.log
 
 VCS_CM ?= line+cond+fsm+tgl+branch
@@ -160,11 +169,11 @@ run-vcs: dirs
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		-l $(LOG_DIR)/$(TEST)_vcs_run.log | tee $(LOG_DIR)/$(TEST)_vcs_stdout.log; \
-	rc=$?; \
-	if [ $rc -ne 0 ]; then \
-		echo "===== FAIL $(TEST): VCS runtime exit=$rc ====="; \
+	rc=$$?; \
+	if [ $$rc -ne 0 ]; then \
+		echo "===== FAIL $(TEST): VCS runtime exit=$$rc ====="; \
 		echo "See: $(LOG_DIR)/$(TEST)_vcs_run.log"; \
-		exit $rc; \
+		exit $$rc; \
 	fi; \
 	if grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_vcs_run.log; then \
 		echo "===== PASS $(TEST) ====="; \
@@ -175,33 +184,20 @@ run-vcs: dirs
 	fi
 
 coverage-merge: dirs
-	@./script/vcs_coverage_merge.sh
+	@bash ./script/vcs_coverage_merge.sh
 
 run_verdi: dirs
-	@if [ -z "$(TEST)" ]; then \
-		echo "Available regression patterns:"; \
-		i=1; \
-		for t in $(TESTS); do \
-			printf "  %2d) %s\\n" $$i $$t; \
-			i=$$(($$i+1)); \
-		done; \
-		printf "Select pattern [1-$(words $(TESTS))]: "; \
-		read choice; \
-		case "$$choice" in ""|*[!0-9]*) echo "ERROR: invalid selection '$$choice'"; exit 2;; esac; \
-		if [ $$choice -lt 1 ] || [ $$choice -gt $(words $(TESTS)) ]; then \
-			echo "ERROR: selection out of range: $$choice"; exit 2; \
-		fi; \
-		selected=$$(printf "%s\\n" $(TESTS) | sed -n "$$choice"p); \
-		echo "Selected: $$selected"; \
-		$(MAKE) --no-print-directory  TEST=$$selected run_verdi; \
-		exit $$?; \
-	fi
+ifeq ($(strip $(TEST)),)
+	$(call select_test,run_verdi)
+else
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
 	@if [ ! -d "$(BUILD_DIR)/simv_$(TEST).daidir" ]; then echo "ERROR: missing $(BUILD_DIR)/simv_$(TEST).daidir; rerun VCS with -kdb first"; exit 2; fi
 	@verdi $(VERDI_OPTS) \
 		-dbdir $(BUILD_DIR)/simv_$(TEST).daidir \
 		-ssf $(FSDB_DIR)/$(TEST).fsdb &
+
+endif
 
 coverage-clean:
 	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report
