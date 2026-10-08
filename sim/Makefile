@@ -104,7 +104,7 @@ run-iverilog: dirs
 	grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_iverilog.log
 
 VCS_CM ?= line+cond+fsm+tgl+branch
-VCS_OPTS ?= -full64 -sverilog -debug_access+all
+VCS_OPTS ?= -full64 -sverilog -debug_access+all -kdb
 VCS_RUN_OPTS ?=
 VERDI_OPTS ?= -nologo -sv
 
@@ -132,9 +132,9 @@ run_verdi: dirs
 	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
-	@verdi $(VERDI_OPTS) +incdir+$(RTL_DIR) +define+ENABLE_FSDB \
-		-top $(TEST) \
-		$($(addprefix TB_RTL_,$(TEST))) $(TB_DIR)/$(TEST).v \
+	@if [ ! -d "$(BUILD_DIR)/simv_$(TEST).daidir" ]; then echo "ERROR: missing $(BUILD_DIR)/simv_$(TEST).daidir; rerun VCS with -kdb first"; exit 2; fi
+	@verdi $(VERDI_OPTS) \
+		-dbdir $(BUILD_DIR)/simv_$(TEST).daidir \
 		-ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 coverage-clean:
