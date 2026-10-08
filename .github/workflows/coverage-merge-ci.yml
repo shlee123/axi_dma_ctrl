@@ -1,0 +1,36 @@
+name: Coverage Merge CI
+
+on:
+  push:
+    paths:
+      - 'sim/script/*'
+      - 'sim/coverage/instances.json'
+      - 'sim/Makefile'
+      - 'sim/tb/*.v'
+      - 'rtl/*.v'
+      - '.github/workflows/coverage-merge-ci.yml'
+  pull_request:
+    paths:
+      - 'sim/script/*'
+      - 'sim/coverage/instances.json'
+      - 'sim/Makefile'
+      - 'sim/tb/*.v'
+      - 'rtl/*.v'
+      - '.github/workflows/coverage-merge-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mapping-and-merge-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Elaborate all source and destination instance paths
+        run: python3 sim/script/validate_coverage_mapping.py --elaborate
+      - name: Test merge ordering, mapping files, reports, and failures
+        run: python3 sim/script/test_coverage_merge.py

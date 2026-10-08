@@ -1,0 +1,44 @@
+name: Synopsys Coverage
+
+# Only dispatch trusted code on a runner configured with VCS/URG and licenses.
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: Additional label of the Linux Synopsys runner
+        required: true
+        default: synopsys
+
+permissions:
+  contents: read
+
+jobs:
+  vcs-coverage:
+    runs-on: [self-hosted, linux, "${{ inputs.runner_label }}"]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check installed tools
+        run: |
+          command -v vcs
+          command -v urg
+          command -v python3
+      - name: Collect fresh coverage and map instances
+        working-directory: sim
+        run: |
+          make coverage-clean
+          make SIMULATOR=vcs regression
+          make coverage-map-check
+          make coverage-merge
+      - name: Upload merged coverage, report, and mapping diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcs-coverage-${{ github.sha }}
+          path: |
+            sim/coverage/merged.vdb
+            sim/coverage/report
+            sim/coverage/mapping
+            sim/coverage/merge-work-*
+            sim/log/*vcs*.log
+          if-no-files-found: error

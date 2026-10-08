@@ -1,0 +1,47 @@
+{
+  "base": "tb_axi_dma_ctrl_smoke",
+  "dut": "dut",
+  "top_tests": [
+    "tb_axi_dma_ctrl_smoke",
+    "tb_axi_dma_ctrl_matrix",
+    "tb_axi_dma_ctrl_error_matrix"
+  ],
+  "units": [
+    {
+      "test": "tb_dma_data_fifo",
+      "module": "dma_data_fifo",
+      "instance": "u_dma_data_fifo",
+      "port": "clk"
+    },
+    {
+      "test": "tb_dma_read_engine",
+      "module": "dma_read_engine",
+      "instance": "u_dma_read_engine",
+      "port": "clk"
+    },
+    {
+      "test": "tb_dma_write_engine",
+      "module": "dma_write_engine",
+      "instance": "u_dma_write_engine",
+      "port": "clk"
+    },
+    {
+      "test": "tb_dma_ctrl",
+      "module": "dma_ctrl",
+      "instance": "u_dma_ctrl",
+      "port": "clk"
+    },
+    {
+      "test": "tb_dma_cdc",
+      "module": "dma_cdc",
+      "instance": "u_dma_cdc",
+      "port": "pclk"
+    },
+    {
+      "test": "tb_dma_apb_regs",
+      "module": "dma_apb_regs",
+      "instance": "u_dma_apb_regs",
+      "port": "pclk"
+    }
+  ]
+}

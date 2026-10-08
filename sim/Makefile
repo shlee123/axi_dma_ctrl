@@ -30,7 +30,7 @@ RTL_ALL := \
 	$(RTL_DIR)/dma_apb_regs.v \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
-.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean coverage-clean coverage-merge $(TESTS)
+.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean coverage-clean coverage-merge coverage-map-check $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -183,6 +183,9 @@ run-vcs: dirs
 		exit 1; \
 	fi
 
+coverage-map-check:
+	@python3 ./script/validate_coverage_mapping.py
+
 coverage-merge: dirs
 	@bash ./script/vcs_coverage_merge.sh
 
@@ -200,7 +203,7 @@ else
 endif
 
 coverage-clean:
-	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report
+	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report $(COV_DIR)/mapping $(COV_DIR)/merge-work-*
 	@mkdir -p $(COV_DIR)/vdb $(COV_DIR)/report
 
 clean:
