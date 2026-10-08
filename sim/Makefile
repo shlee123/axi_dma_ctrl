@@ -36,6 +36,8 @@ help:
 	@echo "AXI2AXI DMA simulation"
 	@echo "  make SIMULATOR=iverilog regression"
 	@echo "  make SIMULATOR=vcs regression"
+	@echo "  make run                              # interactive test selection"
+	@echo "  make run_verdi                        # interactive Verdi selection"
 	@echo "  make SIMULATOR=vcs TEST=tb_axi_dma_ctrl_smoke run"
 	@echo "  make TEST=tb_axi_dma_ctrl_smoke run_verdi"
 	@echo "  make coverage-merge"
@@ -103,7 +105,24 @@ regression: dirs
 	fi
 
 run: dirs
-	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
+	@if [ -z "$(TEST)" ]; then \
+		echo "Available regression patterns:"; \
+		i=1; \
+		for t in $(TESTS); do \
+			printf "  %2d) %s\\n" $$i $$t; \
+			i=$$(($$i+1)); \
+		done; \
+		printf "Select pattern [1-$(words $(TESTS))]: "; \
+		read choice; \
+		case "$$choice" in ""|*[!0-9]*) echo "ERROR: invalid selection '$$choice'"; exit 2;; esac; \
+		if [ $$choice -lt 1 ] || [ $$choice -gt $(words $(TESTS)) ]; then \
+			echo "ERROR: selection out of range: $$choice"; exit 2; \
+		fi; \
+		selected=$$(printf "%s\\n" $(TESTS) | sed -n "$$choice"p); \
+		echo "Selected: $$selected"; \
+		$(MAKE) --no-print-directory SIMULATOR=$(SIMULATOR) TEST=$$selected run; \
+		exit $$?; \
+	fi
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ "$(SIMULATOR)" = "iverilog" ]; then \
 		$(MAKE) --no-print-directory run-iverilog TEST=$(TEST); \
@@ -159,7 +178,24 @@ coverage-merge: dirs
 	@./script/vcs_coverage_merge.sh
 
 run_verdi: dirs
-	@if [ -z "$(TEST)" ]; then echo "ERROR: specify TEST=<tb_name>"; exit 2; fi
+	@if [ -z "$(TEST)" ]; then \
+		echo "Available regression patterns:"; \
+		i=1; \
+		for t in $(TESTS); do \
+			printf "  %2d) %s\\n" $$i $$t; \
+			i=$$(($$i+1)); \
+		done; \
+		printf "Select pattern [1-$(words $(TESTS))]: "; \
+		read choice; \
+		case "$$choice" in ""|*[!0-9]*) echo "ERROR: invalid selection '$$choice'"; exit 2;; esac; \
+		if [ $$choice -lt 1 ] || [ $$choice -gt $(words $(TESTS)) ]; then \
+			echo "ERROR: selection out of range: $$choice"; exit 2; \
+		fi; \
+		selected=$$(printf "%s\\n" $(TESTS) | sed -n "$$choice"p); \
+		echo "Selected: $$selected"; \
+		$(MAKE) --no-print-directory  TEST=$$selected run_verdi; \
+		exit $$?; \
+	fi
 	@if [ ! -f "$(TB_DIR)/$(TEST).v" ]; then echo "ERROR: missing $(TB_DIR)/$(TEST).v"; exit 2; fi
 	@if [ ! -f "$(FSDB_DIR)/$(TEST).fsdb" ]; then echo "ERROR: missing $(FSDB_DIR)/$(TEST).fsdb; run VCS simulation first"; exit 2; fi
 	@if [ ! -d "$(BUILD_DIR)/simv_$(TEST).daidir" ]; then echo "ERROR: missing $(BUILD_DIR)/simv_$(TEST).daidir; rerun VCS with -kdb first"; exit 2; fi
