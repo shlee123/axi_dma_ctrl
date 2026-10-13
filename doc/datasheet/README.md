@@ -9,7 +9,9 @@ The existing APB3 control interface, 32-bit DMA addresses, register map, and sta
 - [English](AXI2AXI_DMA_Datasheet_v0.2_en.docx)
 
 Eight separate chapters: Features; Block diagram; Clock / Reset; HW interface; AXI protocol assumptions; Parameters; Performance / limitations; HW constraints.
-The datasheet includes a block diagram and full hardware interface tables.
+The datasheet includes a block diagram and a Top Module Pin List and Pin Description for all 51 RTL ports.
+The 2026-10-13 supplement lists each port separately with direction, parameterized width and default, clock domain, and purpose.
+Pin inventory checked against `rtl/axi_dma_ctrl.v` at main commit `6e9113cd9643eb316e71cc0be95e714890c39134`.
 The functional contract remains based on the existing specification v0.2.
 
 ## Previous edition v0.1
