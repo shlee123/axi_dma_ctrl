@@ -30,7 +30,9 @@ RTL_ALL := \
 	$(RTL_DIR)/dma_apb_regs.v \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
-.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean coverage-clean coverage-merge coverage-map-check $(TESTS)
+.PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean \
+	coverage coverage-run coverage-tools-check coverage-clean coverage-merge \
+	coverage-map-check coverage-verdi $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -40,7 +42,11 @@ help:
 	@echo "  make run_verdi                        # interactive Verdi selection"
 	@echo "  make SIMULATOR=vcs TEST=tb_axi_dma_ctrl_smoke run"
 	@echo "  make TEST=tb_axi_dma_ctrl_smoke run_verdi"
-	@echo "  make coverage-merge"
+	@echo "  make coverage                         # clean, collect, map, and merge coverage"
+	@echo "  make coverage-run                     # collect all nine VCS coverage databases"
+	@echo "  make coverage-map-check               # validate all source/destination paths"
+	@echo "  make coverage-merge                   # merge current VDBs into one database"
+	@echo "  make coverage-verdi                   # open merged coverage in Verdi"
 	@echo "SIMULATOR defaults to vcs."
 
 dirs:
@@ -150,13 +156,16 @@ run-iverilog: dirs
 	grep -q "PASS $(TEST)" $(LOG_DIR)/$(TEST)_iverilog.log
 
 VCS_CM ?= line+cond+fsm+tgl+branch
+VCS ?= vcs
 VCS_OPTS ?= -full64 -sverilog -debug_access+all -kdb
 VCS_RUN_OPTS ?=
 VERDI_OPTS ?= -nologo -sv
+URG ?= urg
+SYNOPSYS_VERSION ?= V-2023.12-SP2-6
 
 run-vcs: dirs
 	@rtl_files='$($(addprefix TB_RTL_,$(TEST)))'; \
-	vcs $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
+	$(VCS) $(VCS_OPTS) +incdir+$(RTL_DIR) -top $(TEST) \
 		-cm $(VCS_CM) \
 		-cm_dir $(COV_DIR)/vdb/$(TEST).vdb \
 		+define+ENABLE_FSDB \
@@ -186,8 +195,39 @@ run-vcs: dirs
 coverage-map-check:
 	@python3 ./script/validate_coverage_mapping.py
 
+coverage-tools-check:
+	@vcs_version="$$( $(VCS) -ID 2>&1 || true )"; \
+	if [[ "$$vcs_version" != *"$(SYNOPSYS_VERSION)"* ]]; then \
+		echo "ERROR: expected VCS $(SYNOPSYS_VERSION)"; \
+		echo "Detected: $${vcs_version:-<no version output>}"; \
+		exit 2; \
+	fi; \
+	urg_version="$$( $(URG) -version 2>&1 || true )"; \
+	if [[ "$$urg_version" != *"$(SYNOPSYS_VERSION)"* ]]; then \
+		echo "ERROR: expected URG $(SYNOPSYS_VERSION)"; \
+		echo "Detected: $${urg_version:-<no version output>}"; \
+		exit 2; \
+	fi; \
+	echo "Synopsys tools verified: $(SYNOPSYS_VERSION)"
+
+coverage:
+	@$(MAKE) --no-print-directory coverage-clean
+	@$(MAKE) --no-print-directory coverage-run
+	@$(MAKE) --no-print-directory coverage-map-check
+	@$(MAKE) --no-print-directory coverage-merge
+
+coverage-run: coverage-tools-check dirs
+	@$(MAKE) --no-print-directory SIMULATOR=vcs regression
+
 coverage-merge: dirs
-	@bash ./script/vcs_coverage_merge.sh
+	@bash ./script/vcs_coverage_merge.sh \
+		--urg "$(URG)" --expected-version "$(SYNOPSYS_VERSION)"
+
+coverage-verdi:
+	@if [ ! -d "$(COV_DIR)/merged.vdb" ]; then \
+		echo "ERROR: missing $(COV_DIR)/merged.vdb; run make coverage-merge first"; exit 2; \
+	fi
+	@verdi -cov -covdir $(COV_DIR)/merged.vdb &
 
 run_verdi: dirs
 ifeq ($(strip $(TEST)),)

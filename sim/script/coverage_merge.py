@@ -35,7 +35,14 @@ def run_urg(args, log):
     if result.returncode or diagnostics:
         raise RuntimeError(f"URG failed or reported a diagnostic; see {log}")
 
-def merge(coverage, config, urg):
+def check_urg_version(urg, expected_version):
+    result = subprocess.run([urg, "-version"], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True)
+    if result.returncode or expected_version not in result.stdout:
+        detected = result.stdout.strip() or "<no version output>"
+        raise RuntimeError(f"Expected URG {expected_version}; detected: {detected}")
+
+def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
     vdb = coverage / "vdb"
     tests = config["top_tests"] + [u["test"] for u in config["units"]]
     missing = [t for t in tests if not (vdb / (t + ".vdb")).is_dir()]
@@ -43,6 +50,7 @@ def merge(coverage, config, urg):
         raise RuntimeError("Missing required VDBs: " + ", ".join(missing))
     if not shutil.which(urg):
         raise RuntimeError(f"URG executable not found: {urg}")
+    check_urg_version(urg, expected_version)
     # Preserve old outputs until every mapping and report step succeeds.
     work = Path(tempfile.mkdtemp(prefix="merge-work-", dir=coverage))
     current = vdb / (config["base"] + ".vdb")
@@ -99,9 +107,11 @@ def main():
     parser.add_argument("--coverage-dir", type=Path, default=SIM / "coverage")
     parser.add_argument("--config", type=Path, default=CONFIG)
     parser.add_argument("--urg", default="urg")
+    parser.add_argument("--expected-version", default="V-2023.12-SP2-6")
     args = parser.parse_args()
     try:
-        merge(args.coverage_dir.resolve(), json.loads(args.config.read_text()), args.urg)
+        merge(args.coverage_dir.resolve(), json.loads(args.config.read_text()), args.urg,
+              args.expected_version)
     except (RuntimeError, OSError, ValueError) as exc:
         print("ERROR:", exc, file=sys.stderr)
         return 1
