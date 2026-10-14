@@ -66,29 +66,47 @@ def vdb_inventory(vdb):
                 bytes=sum(p.stat().st_size for p in files))
 
 def hierarchy_metrics(report, expected):
-    # Use URG's text table, not loose words in HTML/navigation. Full hierarchy
-    # names must be present on metric rows. Unknown layouts fail closed.
+    """Parse the indented URG V-2023.12 hierarchy.txt SCORE table.
+
+    URG emits a repeated header for every tree level and a row formatted as
+    SCORE LINE COND TOGGLE FSM BRANCH <local_instance_name>. There is no NAME
+    header and the local names must be resolved using header indentation.
+    """
     path = report / "hierarchy.txt"
     if not path.is_file() or not path.stat().st_size:
         raise RuntimeError(f"Missing canonical instances: no hierarchy.txt in {report}")
-    columns = None
     rows = {}
+    stack = []  # (header indentation, fully qualified instance name)
+    columns = None
+    header_indent = None
     aliases = {"TGL": "TOGGLE", "CONDITION": "COND"}
     for line in path.read_text(errors="replace").splitlines():
         tokens = line.replace("|", " ").split()
         normalized = [aliases.get(t.upper(), t.upper()) for t in tokens]
-        if all(m in normalized for m in METRICS) and "NAME" in normalized:
+        if "SCORE" in normalized and all(m in normalized for m in METRICS):
             columns = normalized
+            header_indent = len(line) - len(line.lstrip())
             continue
-        if columns is None or len(tokens) != len(columns):
+        if columns is None or not tokens:
             continue
-        name = tokens[columns.index("NAME")]
+        if len(tokens) != len(columns) + 1:
+            continue
+        # The final field is the LOCAL module/instance name.
+        local = tokens[-1]
+        if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", local):
+            continue
+        # Header indentation controls tree ancestry; never infer a match
+        # from the mere occurrence of an instance name elsewhere in the file.
+        while stack and stack[-1][0] >= header_indent:
+            stack.pop()
+        name = (stack[-1][1] + "." if stack else "") + local
+        stack.append((header_indent, name))
         if name not in expected:
             continue
         values = {}
         for metric in METRICS:
             value = tokens[columns.index(metric)]
-            if re.fullmatch(r"\d+(?:\.\d+)?%?", value):
+            if re.fullmatch(r"\\d+(?:\\.\\d+)?%?", value):
                 score = float(value.rstrip("%"))
                 if not 0 <= score <= 100:
                     raise RuntimeError(f"Invalid {metric} score for {name}: {value}")
