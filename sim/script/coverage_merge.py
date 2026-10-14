@@ -131,7 +131,7 @@ def verify_vdb(urg, vdb, report, log, expected, required=None, fsm_free_vdb=None
     inventory = vdb_inventory(vdb)
     candidates = run_urg(
         [urg, "-full64", "-dir", str(vdb), "-show", "fullhier",
-         "-format", "both", "-report", str(report)], log, fsm_free_vdb=fifo_vdb)
+         "-format", "both", "-report", str(report)], log, fsm_free_vdb=fsm_free_vdb)
     dashboard = report / "dashboard.html"
     if not dashboard.is_file() or not dashboard.stat().st_size:
         raise RuntimeError(f"URG did not generate nonempty dashboard.html; inspect {report}")
