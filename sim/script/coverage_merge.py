@@ -222,13 +222,13 @@ def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
         if candidates:
             values = input_audit[test]["instances"][source]
             if values["FSM"] is not None or any(values[m] is None for m in METRICS if m != "FSM"):
-                raise RuntimeError(f"FIFO missing-FSM diagnostic is not supported by source metrics; see {log}")
+                raise RuntimeError(f"Missing-FSM diagnostic is not supported by source metrics; see {log}")
         # Candidate acceptance follows successful independent stage read and
         # full canonical metric checks; SHAPEMISMATCH is never an exception.
         audit.append(dict(test=test, module=module, source=source,
                           destination=destination, verification=verification,
                           diagnostics=candidates,
-                          classification="validated-fifo-no-fsm" if candidates else "validated"))
+                          classification="validated-no-fsm" if candidates else "validated"))
         (work / "mapping-audit.json").write_text(json.dumps(audit, indent=2) + "\n")
         required = verification["instances"]
     hierarchy = work / "report.hier"
