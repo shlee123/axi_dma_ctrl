@@ -51,12 +51,24 @@ if "-report" in a:
             names = [test + "." + cfg["dut"]]
         if (root / "wrong-parent").exists():
             names = [n.replace(base, "wrong.dut") for n in names]
-        rows = ["SCORE LINE COND TOGGLE FSM BRANCH NAME"]
+        # Match URG V-2023.12's hierarchical score table, including
+        # ancestor rows even when the requested instance is deep.
+        expanded = set()
         for name in names:
-            fsm = "--" if name == "tb_dma_data_fifo.dut" else "0.00"
+            parts = name.split(".")
+            for level in range(1, len(parts) + 1):
+                expanded.add(".".join(parts[:level]))
+        rows = []
+        for name in sorted(expanded, key=lambda n: (n.count("."), n)):
+            depth = name.count(".")
+            indent = "  " * depth
+            rows.append(indent + "SCORE LINE COND TOGGLE FSM BRANCH")
+            fsm = "--" if name in ("tb_dma_data_fifo.dut", "tb_dma_cdc.dut",
+                                    "tb_dma_apb_regs.dut") else "0.00"
             line = "--" if ((root / "missing-metric").exists() or
                            (is_stage_read and (root / "stage-missing-metric").exists())) else "0.00"
-            rows.append("0.00 " + line + " 0.00 0.00 " + fsm + " 0.00 " + name)
+            rows.append(indent + "0.00 " + line + " 0.00 0.00 " + fsm +
+                        " 0.00 " + name.split(".")[-1])
         (report / "hierarchy.txt").write_text("\n".join(rows) + "\n")
 """
 
@@ -206,7 +218,7 @@ class CoverageMergeTests(unittest.TestCase):
         (self.root / "fifo-warning").touch()
         self.run_merge()
         audit = json.loads((self.coverage / "mapping" / "mapping-audit.json").read_text())
-        self.assertEqual(audit[2]["classification"], "validated-fifo-no-fsm")
+        self.assertEqual(audit[2]["classification"], "validated-no-fsm")
         self.assertTrue(audit[2]["diagnostics"])
         (self.root / "empty-fifo-stage").touch()
         with self.assertRaisesRegex(RuntimeError, "nonempty"):
@@ -245,10 +257,10 @@ class CoverageMergeTests(unittest.TestCase):
             with self.subTest(stdout=stdout), patch("coverage_merge.subprocess.run",
                     return_value=subprocess.CompletedProcess([], 0, stdout)):
                 with self.assertRaisesRegex(RuntimeError, "diagnostic"):
-                    run_urg([], self.root / "diagnostic.log", fifo_vdb=allowed)
+                    run_urg([], self.root / "diagnostic.log", fsm_free_vdb=allowed)
         with patch("coverage_merge.subprocess.run",
                    return_value=subprocess.CompletedProcess([], 0, warning)):
-            self.assertEqual(len(run_urg([], self.root / "candidate.log", fifo_vdb=fifo)), 1)
+            self.assertEqual(len(run_urg([], self.root / "candidate.log", fsm_free_vdb=fifo)), 1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
