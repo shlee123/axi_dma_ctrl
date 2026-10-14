@@ -31,7 +31,7 @@ RTL_ALL := \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
 .PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean \
-	coverage coverage-run coverage-tools-check coverage-clean coverage-merge \
+	coverage coverage-run coverage-tools-check coverage-clean coverage-build-clean coverage-merge \
 	coverage-map-check coverage-verdi $(TESTS)
 
 help:
@@ -211,6 +211,7 @@ coverage-tools-check:
 	echo "Synopsys tools verified: $(SYNOPSYS_VERSION)"
 
 coverage:
+	@$(MAKE) --no-print-directory coverage-build-clean
 	@$(MAKE) --no-print-directory coverage-clean
 	@$(MAKE) --no-print-directory coverage-run
 	@$(MAKE) --no-print-directory coverage-map-check
@@ -241,6 +242,10 @@ else
 		-ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 endif
+
+coverage-build-clean:
+	@echo "Removing stale VCS executables and elaboration databases before rebuilding coverage"
+	@rm -rf $(BUILD_DIR)/simv_* $(BUILD_DIR)/csrc $(BUILD_DIR)/simv.daidir
 
 coverage-clean:
 	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report $(COV_DIR)/mapping $(COV_DIR)/merge-work-*
