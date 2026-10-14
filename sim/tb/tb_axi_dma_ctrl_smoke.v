@@ -74,7 +74,7 @@ module tb_axi_dma_ctrl_smoke;
         .AXI_ID_WIDTH(AXI_ID_WIDTH),
         .MAX_BURST_LENGTH(4),
         .DATA_FIFO_DEPTH(8),
-        .AXI_TIMEOUT_CYCLES(32),
+        .AXI_TIMEOUT_CYCLES(64),
         .AXI_ID_VALUE(0)
     ) dut (
         .pclk(pclk),
