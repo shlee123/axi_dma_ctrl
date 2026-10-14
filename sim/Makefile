@@ -32,7 +32,7 @@ RTL_ALL := \
 
 .PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean \
 	coverage coverage-run coverage-tools-check coverage-clean coverage-build-clean coverage-merge \
-	coverage-map-check coverage-verdi $(TESTS)
+	coverage-map-check coverage-merge-test coverage-verdi $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -191,6 +191,9 @@ run-vcs: dirs
 		echo "See: $(LOG_DIR)/$(TEST)_vcs_run.log"; \
 		exit 1; \
 	fi
+
+coverage-merge-test:
+	@python3 ./script/test_coverage_merge.py
 
 coverage-map-check:
 	@python3 ./script/validate_coverage_mapping.py

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from coverage_merge import CONFIG, merge, plan
+from coverage_merge import CONFIG, merge, plan, run_urg, hierarchy_metrics
 from validate_coverage_mapping import validate
 
 STUB = r"""#!/usr/bin/env python3
@@ -21,15 +21,40 @@ with (root / "calls.jsonl").open("a") as f: f.write(json.dumps(a) + "\n")
 if (root / "fail").exists(): print("Error-[TEST] rejected"); sys.exit(3)
 if (root / "warn").exists(): print("Warning-[TEST] instance ignored")
 if "-dbname" in a:
-    pathlib.Path(a[a.index("-dbname") + 1] + ".vdb").mkdir()
+    output = pathlib.Path(a[a.index("-dbname") + 1] + ".vdb")
+    if not (root / "missing-stage").exists():
+        output.mkdir()
+        if not (root / "empty-stage").exists():
+            (output / "data").write_text("stub data")
+    if (root / "fifo-warning").exists() and pathlib.Path(a[a.index("-mapfile") + 1]).stem == "03-tb_dma_data_fifo":
+        fifo = root / "coverage" / "vdb" / "tb_dma_data_fifo.vdb"
+        print("Warning-[UCAPI-SNF] Shape Not Found")
+        print("'Fsm' coverage shape is not there in the vdb '" + str(fifo) + "'")
+if "-dbname" not in a and (root / "reopen-fail").exists():
+    print("Error-[READ] VDB unreadable")
+    sys.exit(2)
 if "-report" in a:
     report = pathlib.Path(a[a.index("-report") + 1])
     report.mkdir(exist_ok=True)
     (report / "dashboard.html").write_text("stub report; no coverage scores")
     if not (root / "missing-hierarchy").exists():
         cfg = json.loads((root / "config.json").read_text())
-        names = [cfg["base"], cfg["dut"]] + [u["instance"] for u in cfg["units"]]
-        (report / "hierarchy.txt").write_text("\n".join(names))
+        base = cfg["base"] + "." + cfg["dut"]
+        names = [base] + [base + "." + u["instance"] for u in cfg["units"]]
+        database = pathlib.Path(a[a.index("-dir") + 1]).name
+        test = database[:-4]
+        if test in cfg["top_tests"]:
+            names = [n.replace(cfg["base"], test, 1) for n in names]
+        elif test in [u["test"] for u in cfg["units"]]:
+            names = [test + "." + cfg["dut"]]
+        if (root / "wrong-parent").exists():
+            names = [n.replace(base, "wrong.dut") for n in names]
+        rows = ["SCORE LINE COND TOGGLE FSM BRANCH NAME"]
+        for name in names:
+            fsm = "--" if name == "tb_dma_data_fifo.dut" else "0.00"
+            line = "--" if (root / "missing-metric").exists() else "0.00"
+            rows.append("0.00 " + line + " 0.00 0.00 " + fsm + " 0.00 " + name)
+        (report / "hierarchy.txt").write_text("\n".join(rows) + "\n")
 """
 
 class CoverageMergeTests(unittest.TestCase):
@@ -42,7 +67,9 @@ class CoverageMergeTests(unittest.TestCase):
         self.coverage = self.root / "coverage"
         (self.coverage / "vdb").mkdir(parents=True)
         for t in self.cfg["top_tests"] + [u["test"] for u in self.cfg["units"]]:
-            (self.coverage / "vdb" / (t + ".vdb")).mkdir()
+            database = self.coverage / "vdb" / (t + ".vdb")
+            database.mkdir()
+            (database / "data").write_text("stub data")
         self.urg = self.root / "urg"
         self.urg.write_text(STUB)
         self.urg.chmod(0o755)
@@ -71,9 +98,16 @@ class CoverageMergeTests(unittest.TestCase):
         self.old_output()
         self.run_merge()
         calls = [json.loads(line) for line in (self.root / "calls.jsonl").read_text().splitlines()]
-        self.assertEqual(len(calls), 9)
+        self.assertEqual(len(calls), 26)
+        merge_calls = [call for call in calls if "-mapfile" in call]
+        reopen_calls = [call for call in calls if "-dbname" not in call and
+                        "stage-" in call[call.index("-dir") + 1]]
+        self.assertEqual(len(reopen_calls), 9)
+        for call in reopen_calls:
+            self.assertNotIn("-mapfile", call)
+            self.assertEqual(call.index("-show") - call.index("-dir"), 2)
         stages = plan(self.cfg)
-        for call, (test, module, source, destination) in zip(calls[:8], stages):
+        for call, (test, module, source, destination) in zip(merge_calls, stages):
             dirs = call[call.index("-dir") + 1:call.index("-mapfile")]
             self.assertTrue(dirs[1].endswith(test + ".vdb"))
             self.assertNotIn("-flex_merge", call)
@@ -83,7 +117,7 @@ class CoverageMergeTests(unittest.TestCase):
             self.assertIn("MODULE: " + module, text)
             self.assertIn("SRC: " + source, text)
             self.assertIn("DST: " + destination, text)
-        self.assertTrue(calls[0][calls[0].index("-dir") + 1].endswith(self.cfg["base"] + ".vdb"))
+        self.assertTrue(merge_calls[0][merge_calls[0].index("-dir") + 1].endswith(self.cfg["base"] + ".vdb"))
         self.assertTrue((self.coverage / "merged.vdb").is_dir())
         self.assertTrue((self.coverage / "report" / "dashboard.html").is_file())
         self.assertEqual(len(list(self.coverage.glob("*.vdb"))), 1)
@@ -91,7 +125,9 @@ class CoverageMergeTests(unittest.TestCase):
 
     def test_missing_database_preserves_report(self):
         self.old_output()
-        (self.coverage / "vdb" / (self.cfg["base"] + ".vdb")).rmdir()
+        database = self.coverage / "vdb" / (self.cfg["base"] + ".vdb")
+        (database / "data").unlink()
+        database.rmdir()
         with self.assertRaisesRegex(RuntimeError, "Missing required VDBs"): self.run_merge()
         self.assert_preserved()
         self.assertFalse((self.root / "calls.jsonl").exists())
@@ -128,6 +164,71 @@ class CoverageMergeTests(unittest.TestCase):
         (self.root / "missing-hierarchy").touch()
         with self.assertRaisesRegex(RuntimeError, "Missing canonical instances"): self.run_merge()
         self.assert_preserved()
+
+
+    def test_empty_stage_and_missing_stage_fail(self):
+        for marker in ("empty-stage", "missing-stage"):
+            with self.subTest(marker=marker):
+                self.old_output() if not (self.coverage / "merged.vdb").exists() else None
+                (self.root / marker).touch()
+                with self.assertRaisesRegex(RuntimeError, "VDB"):
+                    self.run_merge()
+                self.assert_preserved()
+                (self.root / marker).unlink()
+
+    def test_empty_input_fails(self):
+        self.old_output()
+        (self.coverage / "vdb" / (self.cfg["base"] + ".vdb") / "data").write_text("")
+        with self.assertRaisesRegex(RuntimeError, "nonempty"):
+            self.run_merge()
+        self.assert_preserved()
+
+    def test_unreadable_vdb_fails(self):
+        self.old_output()
+        (self.root / "reopen-fail").touch()
+        with self.assertRaisesRegex(RuntimeError, "URG failed"):
+            self.run_merge()
+        self.assert_preserved()
+
+    def test_wrong_parent_and_missing_metrics_fail(self):
+        for marker in ("wrong-parent", "missing-metric"):
+            with self.subTest(marker=marker):
+                (self.root / marker).touch()
+                with self.assertRaises(RuntimeError):
+                    self.run_merge()
+                (self.root / marker).unlink()
+
+    def test_fifo_warning_requires_valid_stage(self):
+        (self.root / "fifo-warning").touch()
+        self.run_merge()
+        audit = json.loads((self.coverage / "mapping" / "mapping-audit.json").read_text())
+        self.assertEqual(audit[2]["classification"], "validated-fifo-no-fsm")
+        self.assertTrue(audit[2]["diagnostics"])
+        (self.root / "empty-stage").touch()
+        with self.assertRaisesRegex(RuntimeError, "nonempty"):
+            self.run_merge()
+
+    def test_diagnostic_blocks_do_not_mask_other_errors(self):
+        from unittest.mock import patch
+        import subprocess
+        fifo = self.coverage / "vdb" / "tb_dma_data_fifo.vdb"
+        warning = ("Warning-[UCAPI-SNF] Shape Not Found\n"
+                   "'Fsm' coverage shape is not there in the vdb '" + str(fifo) + "'\n")
+        cases = [
+            ("Warning-[SHAPEMISMATCH] incompatible\n", None),
+            (warning + "Error-[TEST] invalid\n", fifo),
+            (warning.replace("'Fsm'", "'Line'"), fifo),
+            (warning.replace("tb_dma_data_fifo.vdb", "other.vdb"), fifo),
+            (warning, None),
+        ]
+        for stdout, allowed in cases:
+            with self.subTest(stdout=stdout), patch("coverage_merge.subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 0, stdout)):
+                with self.assertRaisesRegex(RuntimeError, "diagnostic"):
+                    run_urg([], self.root / "diagnostic.log", fifo_vdb=allowed)
+        with patch("coverage_merge.subprocess.run",
+                   return_value=subprocess.CompletedProcess([], 0, warning)):
+            self.assertEqual(len(run_urg([], self.root / "candidate.log", fifo_vdb=fifo)), 1)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
