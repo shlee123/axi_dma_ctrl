@@ -26,8 +26,9 @@ def plan(config):
 def map_text(module, source, destination):
     return f"MODULE: {module}\nINSTANCE:\nSRC: {source}\nDST: {destination}\n"
 
-def run_urg(args, log):
-    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+def run_urg(args, log, cwd=None):
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            universal_newlines=True, cwd=str(cwd) if cwd else None)
     log.write_text(result.stdout)
     # URG may return zero after skipping an incompatible instance. Never accept
     # a report that silently discarded a source. Keep complete logs for review.
@@ -61,9 +62,11 @@ def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
         stem = work / f"stage-{index:02d}"
         log = work / f"{index:02d}-{test}.log"
         run_urg([urg, "-full64", "-dir", str(current), str(vdb / (test + ".vdb")),
-                 "-mapfile", str(mapping), "-dbname", str(stem),
-                 "-report", str(work / "stage-report")], log)
-        current = Path(str(stem) + ".vdb")
+                 "-mapfile", str(mapping), "-dbname", stem.name,
+                 "-report", str(work / "stage-report")], log, cwd=work)
+        # URG -dbname is a database NAME, not a path. A path argument can be
+        # flattened into an unexpected database name next to the work directory.
+        current = work / (stem.name + ".vdb")
         if not current.is_dir():
             raise RuntimeError(f"URG did not create expected database {current}; see {log}")
         audit.append(dict(test=test, module=module, source=source, destination=destination))
