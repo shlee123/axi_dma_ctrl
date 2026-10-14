@@ -45,7 +45,7 @@ help:
 	@echo "  make coverage                         # clean, collect, map, and merge coverage"
 	@echo "  make coverage-run                     # collect all nine VCS coverage databases"
 	@echo "  make coverage-map-check               # validate all source/destination paths"
-	@echo "  make coverage-merge                   # merge current VDBs into one database"
+	@echo "  make coverage-merge                   # merge current VDBs into one database\n\t@echo "  make coverage-preflight               # scan existing VDBs before URG merge"\n\t@echo "  make coverage-diagnose                # collect all nine VDB reports in tar.gz""
 	@echo "  make coverage-verdi                   # open merged coverage in Verdi"
 	@echo "SIMULATOR defaults to vcs."
 
@@ -218,6 +218,7 @@ coverage:
 	@$(MAKE) --no-print-directory coverage-clean
 	@$(MAKE) --no-print-directory coverage-run
 	@$(MAKE) --no-print-directory coverage-map-check
+	@$(MAKE) --no-print-directory coverage-preflight
 	@$(MAKE) --no-print-directory coverage-merge
 
 coverage-run: coverage-tools-check dirs
@@ -226,6 +227,12 @@ coverage-run: coverage-tools-check dirs
 coverage-merge: dirs
 	@bash ./script/vcs_coverage_merge.sh \
 		--urg "$(URG)" --expected-version "$(SYNOPSYS_VERSION)"
+
+coverage-preflight: coverage-map-check
+	@python3 ./script/coverage_diagnose.py --preflight
+
+coverage-diagnose:
+	@python3 ./script/coverage_diagnose.py
 
 coverage-verdi:
 	@if [ ! -d "$(COV_DIR)/merged.vdb" ]; then \
