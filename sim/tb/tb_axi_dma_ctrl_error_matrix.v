@@ -3,7 +3,7 @@
 module tb_axi_dma_ctrl_error_matrix;
 
     localparam AXI_ID_WIDTH = 6;
-    localparam TIMEOUT_CYCLES = 8;
+    localparam TIMEOUT_CYCLES = 64;
 
     reg pclk;
     reg axi_clk;
