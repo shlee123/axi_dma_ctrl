@@ -106,7 +106,7 @@ def hierarchy_metrics(report, expected):
         values = {}
         for metric in METRICS:
             value = tokens[columns.index(metric)]
-            if re.fullmatch(r"\\d+(?:\\.\\d+)?%?", value):
+            if re.fullmatch(r"\d+(?:\.\d+)?%?", value):
                 score = float(value.rstrip("%"))
                 if not 0 <= score <= 100:
                     raise RuntimeError(f"Invalid {metric} score for {name}: {value}")
