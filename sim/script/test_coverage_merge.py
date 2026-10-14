@@ -24,13 +24,15 @@ if "-dbname" in a:
     output = pathlib.Path(a[a.index("-dbname") + 1] + ".vdb")
     if not (root / "missing-stage").exists():
         output.mkdir()
-        if not (root / "empty-stage").exists():
+        if not (root / "empty-stage").exists() and not ((root / "empty-fifo-stage").exists() and output.name == "stage-03.vdb"):
             (output / "data").write_text("stub data")
     if (root / "fifo-warning").exists() and pathlib.Path(a[a.index("-mapfile") + 1]).stem == "03-tb_dma_data_fifo":
         fifo = root / "coverage" / "vdb" / "tb_dma_data_fifo.vdb"
         print("Warning-[UCAPI-SNF] Shape Not Found")
         print("'Fsm' coverage shape is not there in the vdb '" + str(fifo) + "'")
-if "-dbname" not in a and (root / "reopen-fail").exists():
+is_stage_read = "-dbname" not in a and pathlib.Path(a[a.index("-dir") + 1]).name.startswith("stage-")
+if "-dbname" not in a and ((root / "reopen-fail").exists() or
+                          (is_stage_read and (root / "stage-read-fail").exists())):
     print("Error-[READ] VDB unreadable")
     sys.exit(2)
 if "-report" in a:
@@ -52,7 +54,8 @@ if "-report" in a:
         rows = ["SCORE LINE COND TOGGLE FSM BRANCH NAME"]
         for name in names:
             fsm = "--" if name == "tb_dma_data_fifo.dut" else "0.00"
-            line = "--" if (root / "missing-metric").exists() else "0.00"
+            line = "--" if ((root / "missing-metric").exists() or
+                           (is_stage_read and (root / "stage-missing-metric").exists())) else "0.00"
             rows.append("0.00 " + line + " 0.00 0.00 " + fsm + " 0.00 " + name)
         (report / "hierarchy.txt").write_text("\n".join(rows) + "\n")
 """
@@ -105,7 +108,8 @@ class CoverageMergeTests(unittest.TestCase):
         self.assertEqual(len(reopen_calls), 9)
         for call in reopen_calls:
             self.assertNotIn("-mapfile", call)
-            self.assertEqual(call.index("-show") - call.index("-dir"), 2)
+            boundary = call.index("-hier") if "-hier" in call else call.index("-show")
+            self.assertEqual(boundary - call.index("-dir"), 2)
         stages = plan(self.cfg)
         for call, (test, module, source, destination) in zip(merge_calls, stages):
             dirs = call[call.index("-dir") + 1:call.index("-mapfile")]
@@ -204,9 +208,25 @@ class CoverageMergeTests(unittest.TestCase):
         audit = json.loads((self.coverage / "mapping" / "mapping-audit.json").read_text())
         self.assertEqual(audit[2]["classification"], "validated-fifo-no-fsm")
         self.assertTrue(audit[2]["diagnostics"])
-        (self.root / "empty-stage").touch()
+        (self.root / "empty-fifo-stage").touch()
         with self.assertRaisesRegex(RuntimeError, "nonempty"):
             self.run_merge()
+
+    def test_stage_reopen_and_metric_loss_fail_before_next_merge(self):
+        for marker in ("stage-read-fail", "stage-missing-metric"):
+            with self.subTest(marker=marker):
+                if not (self.coverage / "merged.vdb").exists():
+                    self.old_output()
+                calls_path = self.root / "calls.jsonl"
+                if calls_path.exists():
+                    calls_path.unlink()
+                (self.root / marker).touch()
+                with self.assertRaises(RuntimeError):
+                    self.run_merge()
+                self.assert_preserved()
+                calls = [json.loads(s) for s in calls_path.read_text().splitlines()]
+                self.assertEqual(sum("-mapfile" in c for c in calls), 1)
+                (self.root / marker).unlink()
 
     def test_diagnostic_blocks_do_not_mask_other_errors(self):
         from unittest.mock import patch
