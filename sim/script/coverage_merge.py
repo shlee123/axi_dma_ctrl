@@ -43,9 +43,10 @@ def run_urg(args, log, cwd=None):
         missing_fsm = ("'Fsm' coverage shape is not there in the vdb" in result.stdout
                        and "tb_dma_data_fifo.vdb" in result.stdout
                        and log.name == "03-tb_dma_data_fifo.log")
-    stripped = re.sub(r"(?ms)^Warning-\\[UCAPI-SNF\\] Shape Not Found\\s*\\n"
-                      r".*?(?=^Warning-|^Error|^Fatal|^Note-|\\Z)", "",
-                      result.stdout) if missing_fsm else result.stdout
+    # Remove only the audited SNF warning HEADER from diagnostic detection;
+    # any other Warning/Error/Fatal remains a hard failure.
+    stripped = re.sub(r"(?m)^Warning-\\[UCAPI-SNF\\] Shape Not Found\\s*$",
+                      "", result.stdout) if missing_fsm else result.stdout
     diagnostics = re.search(r"(?im)^\\s*(?:Warning|Error|Fatal)(?:\\s*[-:]|\\s*\\[)", stripped)
     if result.returncode or diagnostics or ("Warning-[UCAPI-SNF]" in result.stdout and not missing_fsm):
         raise RuntimeError(f"URG failed or reported a diagnostic; see {log}")
