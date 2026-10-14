@@ -30,7 +30,7 @@ METRICS = ("LINE", "COND", "TOGGLE", "FSM", "BRANCH")
 DIAGNOSTIC = re.compile(r"(?im)^\s*(?:Warning|Error|Fatal)(?:\s*[-:]|\s*\[)")
 SNF_HEADER = "Warning-[UCAPI-SNF] Shape Not Found"
 
-def run_urg(args, log, cwd=None, fifo_vdb=None):
+def run_urg(args, log, cwd=None, fsm_free_vdb=None):
     result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             universal_newlines=True, cwd=str(cwd) if cwd else None)
     log.write_text(result.stdout)
@@ -44,11 +44,11 @@ def run_urg(args, log, cwd=None, fifo_vdb=None):
                               if i + 1 < len(starts) else len(result.stdout)]
         paths = re.findall(r"[^\s'\"<>]+\.vdb\b", block)
         candidate = (
-            fifo_vdb is not None
+            fsm_free_vdb is not None
             and block.lstrip().splitlines()[0].strip() == SNF_HEADER
             and "'Fsm' coverage shape is not there in the vdb" in block
             and len(paths) == 1
-            and Path(paths[0]).resolve() == fifo_vdb.resolve()
+            and Path(paths[0]).resolve() == fsm_free_vdb.resolve()
             and "SHAPEMISMATCH" not in block.upper())
         (candidates if candidate else rejected).append(block.strip())
     if result.returncode or rejected or "SHAPEMISMATCH" in result.stdout.upper():
@@ -127,11 +127,11 @@ def hierarchy_metrics(report, expected):
             raise RuntimeError(f"Incomplete line/toggle coverage for {name}; inspect {path}")
     return rows
 
-def verify_vdb(urg, vdb, report, log, expected, required=None, fifo_vdb=None):
+def verify_vdb(urg, vdb, report, log, expected, required=None, fsm_free_vdb=None):
     inventory = vdb_inventory(vdb)
     candidates = run_urg(
         [urg, "-full64", "-dir", str(vdb), "-show", "fullhier",
-         "-format", "both", "-report", str(report)], log, fifo_vdb=fifo_vdb)
+         "-format", "both", "-report", str(report)], log, fsm_free_vdb=fifo_vdb)
     dashboard = report / "dashboard.html"
     if not dashboard.is_file() or not dashboard.stat().st_size:
         raise RuntimeError(f"URG did not generate nonempty dashboard.html; inspect {report}")
@@ -140,14 +140,14 @@ def verify_vdb(urg, vdb, report, log, expected, required=None, fifo_vdb=None):
         for metric, value in previous.items():
             if value is not None and metrics[name][metric] is None:
                 raise RuntimeError(f"Incomplete {metric} coverage for {name}; inspect {report}")
-    # An FSM-free FIFO must still have every other requested coverage metric.
+    # Some unit RTL has no instrumentable FSM. Only a matching VDB-specific
+    # UCAPI-SNF warning is eligible, and the report must confirm FSM=N/A.
     if candidates:
-        fifo_name = next((n for n in expected if n.startswith("tb_dma_data_fifo.")), None)
-        if fifo_name is None or any(metrics[fifo_name][m] is None
-                                   for m in METRICS if m != "FSM"):
-            raise RuntimeError(f"Incomplete FIFO coverage despite missing-FSM diagnostic; see {log}")
-        if metrics[fifo_name]["FSM"] is not None:
-            raise RuntimeError(f"Contradictory FIFO FSM diagnostic/report; see {log}")
+        if len(expected) != 1 or any(metrics[expected[0]][m] is None
+                                     for m in METRICS if m != "FSM"):
+            raise RuntimeError(f"Incomplete non-FSM metrics despite missing-FSM diagnostic; see {log}")
+        if metrics[expected[0]]["FSM"] is not None:
+            raise RuntimeError(f"Contradictory missing-FSM diagnostic/report; see {log}")
     return dict(vdb=str(vdb), inventory=inventory, instances=metrics,
                 missing_fsm_diagnostics=candidates)
 
@@ -172,7 +172,9 @@ def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
     work = Path(tempfile.mkdtemp(prefix="merge-work-", dir=coverage))
     canonical = config["base"] + "." + config["dut"]
     expected = [canonical] + [canonical + "." + u["instance"] for u in config["units"]]
-    fifo = vdb / "tb_dma_data_fifo.vdb"
+    # Missing FSM shape is acceptable only if the standalone source report
+    # proves FSM=N/A and all other expected metrics are present.
+    fsm_free_units = {"tb_dma_data_fifo", "tb_dma_cdc", "tb_dma_apb_regs"}
     input_audit = {}
     for test in tests:
         names = expected if test == config["base"] else (
@@ -182,7 +184,7 @@ def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
         input_audit[test] = verify_vdb(
             urg, vdb / (test + ".vdb"), work / ("input-" + test),
             work / ("input-" + test + ".log"), names,
-            fifo_vdb=fifo if test == "tb_dma_data_fifo" else None)
+            fsm_free_vdb=vdb / (test + ".vdb") if test in fsm_free_units else None)
     for test in config["top_tests"]:
         root_metrics = input_audit[test]["instances"][test + "." + config["dut"]]
         if any(root_metrics[m] is None for m in METRICS):
@@ -204,8 +206,7 @@ def merge(coverage, config, urg, expected_version="V-2023.12-SP2-6"):
              "-mapfile", str(mapping), "-dbname", stem.name,
              "-report", str(work / f"stage-{index:02d}-merge-report")],
             log, cwd=work,
-            fifo_vdb=fifo if (index, test, module) ==
-            (3, "tb_dma_data_fifo", "dma_data_fifo") else None)
+            fsm_free_vdb=vdb / (test + ".vdb") if test in fsm_free_units else None)
         # -dbname takes a NAME. Reopen ONLY its output, with no source VDB
         # and no mapfile, so a missing/broken stage cannot hide behind inputs.
         current = work / (stem.name + ".vdb")
