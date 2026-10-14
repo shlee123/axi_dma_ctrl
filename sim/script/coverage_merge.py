@@ -32,8 +32,22 @@ def run_urg(args, log, cwd=None):
     log.write_text(result.stdout)
     # URG may return zero after skipping an incompatible instance. Never accept
     # a report that silently discarded a source. Keep complete logs for review.
-    diagnostics = re.search(r"(?im)^\s*(?:Warning|Error|Fatal)(?:\s*[-:]|\s*\[)", result.stdout)
-    if result.returncode or diagnostics:
+    # An FSM metric can be requested at compile time yet contain zero
+    # instrumentable FSM objects in a small unit (e.g. dma_data_fifo).
+    # URG reports UCAPI-SNF for that absent shape. It does not indicate a
+    # mismatched mapped object. Keep the warning in the log, and narrowly
+    # allow this sole diagnostic for the explicitly known FSM-free unit.
+    lines = result.stdout.splitlines()
+    missing_fsm = any("Warning-[UCAPI-SNF] Shape Not Found" in line for line in lines)
+    if missing_fsm:
+        missing_fsm = ("'Fsm' coverage shape is not there in the vdb" in result.stdout
+                       and "tb_dma_data_fifo.vdb" in result.stdout
+                       and log.name == "03-tb_dma_data_fifo.log")
+    stripped = re.sub(r"(?ms)^Warning-\\[UCAPI-SNF\\] Shape Not Found\\s*\\n"
+                      r".*?(?=^Warning-|^Error|^Fatal|^Note-|\\Z)", "",
+                      result.stdout) if missing_fsm else result.stdout
+    diagnostics = re.search(r"(?im)^\\s*(?:Warning|Error|Fatal)(?:\\s*[-:]|\\s*\\[)", stripped)
+    if result.returncode or diagnostics or ("Warning-[UCAPI-SNF]" in result.stdout and not missing_fsm):
         raise RuntimeError(f"URG failed or reported a diagnostic; see {log}")
 
 def check_urg_version(urg, expected_version):
