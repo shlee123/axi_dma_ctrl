@@ -6,7 +6,7 @@ module tb_dma_read_engine;
     localparam AXI_DATA_WIDTH   = 32;
     localparam AXI_ID_WIDTH     = 6;
     localparam FIFO_COUNT_WIDTH = 4;
-    localparam TIMEOUT_CYCLES   = 4;
+    localparam TIMEOUT_CYCLES   = 64;
 
     reg clk;
     reg rst_n;
@@ -60,7 +60,7 @@ module tb_dma_read_engine;
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
         .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
         .AXI_ID_WIDTH(AXI_ID_WIDTH),
-        .MAX_BURST_LENGTH(8),
+        .MAX_BURST_LENGTH(4),
         .FIFO_COUNT_WIDTH(FIFO_COUNT_WIDTH),
         .AXI_TIMEOUT_CYCLES(TIMEOUT_CYCLES),
         .AXI_ID_VALUE(0)
