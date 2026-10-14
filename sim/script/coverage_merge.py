@@ -27,7 +27,7 @@ def map_text(module, source, destination):
     return f"MODULE: {module}\nINSTANCE:\nSRC: {source}\nDST: {destination}\n"
 
 def run_urg(args, log):
-    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     log.write_text(result.stdout)
     # URG may return zero after skipping an incompatible instance. Never accept
     # a report that silently discarded a source. Keep complete logs for review.
@@ -37,7 +37,7 @@ def run_urg(args, log):
 
 def check_urg_version(urg, expected_version):
     result = subprocess.run([urg, "-version"], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True)
+                            stderr=subprocess.STDOUT, universal_newlines=True)
     if result.returncode or expected_version not in result.stdout:
         detected = result.stdout.strip() or "<no version output>"
         raise RuntimeError(f"Expected URG {expected_version}; detected: {detected}")
