@@ -228,6 +228,104 @@ module tb_dma_write_engine;
     endtask
 
 
+
+    integer w_seen = 0;
+    integer b_seen = 0;
+    integer advance_seen = 0;
+    integer released_beats = 0;
+    integer base_w, base_b, base_advance, base_release_beats;
+    integer base_reserve, base_release, base_done, base_timeout, base_resp;
+
+    always @(posedge clk) begin
+        if (rst_n) begin
+            if (m_axi_wvalid && m_axi_wready) w_seen = w_seen + 1;
+            if (m_axi_bvalid && m_axi_bready) b_seen = b_seen + 1;
+            if (fifo_rd_advance) advance_seen = advance_seen + 1;
+        end
+        #1;
+        if (rst_n && fifo_release_valid)
+            released_beats = released_beats + fifo_release_beats;
+    end
+
+    initial begin
+        #200000;
+        $fatal(1, "tb_dma_write_engine watchdog expired");
+    end
+
+    task test_w_timeout;
+        begin
+            $display("[%0t] TEST6 W timeout, late READY and B obligation", $time);
+            @(negedge clk);
+            base_w = w_seen;
+            base_b = b_seen;
+            base_advance = advance_seen;
+            base_release_beats = released_beats;
+            base_reserve = reserve_seen;
+            base_release = release_seen;
+            base_done = done_seen;
+            base_timeout = timeout_seen;
+            base_resp = resp_error_seen;
+            pulse_start(32'h0000_5000, 13'd6);
+            wait_reserve(2);
+            wait_aw_and_accept(32'h0000_5000, 1);
+            @(negedge clk);
+            fifo_rd_valid = 1;
+            fifo_rd_data = 32'hA5A5_5A5A;
+            m_axi_wready = 0;
+            repeat (2 * TIMEOUT_CYCLES) begin
+                @(negedge clk);
+                #1;
+                if (m_axi_wvalid !== 1 || m_axi_wdata !== 32'hA5A5_5A5A ||
+                    m_axi_wstrb !== 4'b1111 || m_axi_wlast !== 0 ||
+                    fifo_rd_advance !== 0 || wr_busy !== 1)
+                    $fatal(1, "TEST6 W payload/obligation changed under stall");
+            end
+            if (timeout_seen != base_timeout + 1 || reserve_seen != base_reserve + 1 ||
+                release_seen != base_release || released_beats != base_release_beats ||
+                w_seen != base_w || b_seen != base_b || advance_seen != base_advance ||
+                done_seen != base_done || resp_error_seen != base_resp)
+                $fatal(1, "TEST6 W timeout/stalled accounting");
+            // Complete the same stalled first beat; it must not be duplicated.
+            @(negedge clk);
+            m_axi_wready = 1;
+            @(posedge clk);
+            @(negedge clk);
+            m_axi_wready = 0;
+            fifo_rd_valid = 0;
+            send_wbeat(32'h5A5A_A5A5, 4'b0011, 1);
+            repeat (8) @(negedge clk);
+            #1;
+            if (w_seen != base_w + 2 || advance_seen != base_advance + 2 ||
+                release_seen != base_release + 1 ||
+                released_beats != base_release_beats + 2 ||
+                b_seen != base_b || m_axi_bready !== 1 || wr_busy !== 1 ||
+                done_seen != base_done || timeout_seen != base_timeout + 1)
+                $fatal(1, "TEST6 release accounting or B obligation lost");
+            send_bresp(0);
+            wait_cycles(4);
+            #2;
+            if (b_seen != base_b + 1 || wr_busy !== 0 || done_seen != base_done ||
+                release_seen != base_release + 1 || timeout_seen != base_timeout + 1 ||
+                resp_error_seen != base_resp || m_axi_awvalid !== 0)
+                $fatal(1, "TEST6 failed write incorrectly completed successfully");
+            // An ordinary timeout must not prevent a new successful command.
+            pulse_start(32'h0000_5100, 13'd4);
+            wait_reserve(1);
+            wait_aw_and_accept(32'h0000_5100, 0);
+            send_wbeat(32'h1234_5678, 4'b1111, 1);
+            send_bresp(0);
+            wait_cycles(4);
+            #2;
+            if (done_seen != base_done + 1 || reserve_seen != base_reserve + 2 ||
+                release_seen != base_release + 2 ||
+                released_beats != base_release_beats + 3 ||
+                w_seen != base_w + 3 || b_seen != base_b + 2 ||
+                advance_seen != base_advance + 3 || timeout_seen != base_timeout + 1 ||
+                resp_error_seen != base_resp)
+                $fatal(1, "TEST6 successful restart accounting");
+        end
+    endtask
+
     // Optional FSDB dump stub.
     // Enabled by the VCS Makefile flow with +define+ENABLE_FSDB.
 `ifdef ENABLE_FSDB
@@ -356,6 +454,8 @@ module tb_dma_write_engine;
             $display("[%0t] ERROR TEST5 AWVALID asserted after pre-reserve abort", $time);
             errors = errors + 1;
         end
+
+        test_w_timeout();
 
         if (errors == 0)
             $display("[%0t] PASS tb_dma_write_engine", $time);
