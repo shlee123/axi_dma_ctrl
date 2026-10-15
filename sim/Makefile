@@ -31,8 +31,8 @@ RTL_ALL := \
 	$(RTL_DIR)/axi_dma_ctrl.v
 
 .PHONY: help dirs regression run run-iverilog run-vcs run_verdi clean \
-	coverage coverage-run coverage-tools-check coverage-clean coverage-merge \
-	coverage-map-check coverage-verdi $(TESTS)
+	coverage coverage-run coverage-tools-check coverage-clean coverage-build-clean coverage-merge \
+	coverage-map-check coverage-merge-test coverage-verdi $(TESTS)
 
 help:
 	@echo "AXI2AXI DMA simulation"
@@ -45,7 +45,7 @@ help:
 	@echo "  make coverage                         # clean, collect, map, and merge coverage"
 	@echo "  make coverage-run                     # collect all nine VCS coverage databases"
 	@echo "  make coverage-map-check               # validate all source/destination paths"
-	@echo "  make coverage-merge                   # merge current VDBs into one database"
+	@echo "  make coverage-merge                   # merge current VDBs into one database\n\t@echo "  make coverage-preflight               # scan existing VDBs before URG merge"\n\t@echo "  make coverage-diagnose                # collect all nine VDB reports in tar.gz""
 	@echo "  make coverage-verdi                   # open merged coverage in Verdi"
 	@echo "SIMULATOR defaults to vcs."
 
@@ -192,6 +192,9 @@ run-vcs: dirs
 		exit 1; \
 	fi
 
+coverage-merge-test:
+	@python3 ./script/test_coverage_merge.py
+
 coverage-map-check:
 	@python3 ./script/validate_coverage_mapping.py
 
@@ -211,9 +214,11 @@ coverage-tools-check:
 	echo "Synopsys tools verified: $(SYNOPSYS_VERSION)"
 
 coverage:
+	@$(MAKE) --no-print-directory coverage-build-clean
 	@$(MAKE) --no-print-directory coverage-clean
 	@$(MAKE) --no-print-directory coverage-run
 	@$(MAKE) --no-print-directory coverage-map-check
+	@$(MAKE) --no-print-directory coverage-preflight
 	@$(MAKE) --no-print-directory coverage-merge
 
 coverage-run: coverage-tools-check dirs
@@ -222,6 +227,12 @@ coverage-run: coverage-tools-check dirs
 coverage-merge: dirs
 	@bash ./script/vcs_coverage_merge.sh \
 		--urg "$(URG)" --expected-version "$(SYNOPSYS_VERSION)"
+
+coverage-preflight: coverage-map-check
+	@python3 ./script/coverage_diagnose.py --preflight
+
+coverage-diagnose:
+	@python3 ./script/coverage_diagnose.py
 
 coverage-verdi:
 	@if [ ! -d "$(COV_DIR)/merged.vdb" ]; then \
@@ -241,6 +252,10 @@ else
 		-ssf $(FSDB_DIR)/$(TEST).fsdb &
 
 endif
+
+coverage-build-clean:
+	@echo "Removing stale VCS executables and elaboration databases before rebuilding coverage"
+	@rm -rf $(BUILD_DIR)/simv_* $(BUILD_DIR)/csrc $(BUILD_DIR)/simv.daidir
 
 coverage-clean:
 	@rm -rf $(COV_DIR)/vdb $(COV_DIR)/merged.vdb $(COV_DIR)/report $(COV_DIR)/mapping $(COV_DIR)/merge-work-*

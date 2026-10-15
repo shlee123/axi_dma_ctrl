@@ -55,7 +55,8 @@ module tb_dma_ctrl;
 
     dma_ctrl #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
-        .AXI_DATA_WIDTH(AXI_DATA_WIDTH)
+        .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+        .FIFO_COUNT_WIDTH(4)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
