@@ -184,6 +184,179 @@ module tb_dma_read_engine;
     endtask
 
 
+
+    // Observe actual handshakes before sequential updates.
+    integer ar_seen = 0;
+    integer r_seen = 0;
+    integer stored_seen = 0;
+    integer begin_seen = 0;
+    integer base_ar, base_r, base_stored, base_begin;
+    integer base_commit, base_discard, base_done, base_timeout, base_protocol;
+
+    always @(posedge clk) begin
+        if (rst_n) begin
+            if (m_axi_arvalid && m_axi_arready) ar_seen = ar_seen + 1;
+            if (m_axi_rvalid && m_axi_rready) r_seen = r_seen + 1;
+            if (fifo_wr_valid && fifo_wr_ready) stored_seen = stored_seen + 1;
+        end
+        #1;
+        if (rst_n && fifo_burst_begin) begin_seen = begin_seen + 1;
+    end
+
+    // Bound all helper waits, including pre-existing cases.
+    initial begin
+        #200000;
+        $fatal(1, "tb_dma_read_engine watchdog expired");
+    end
+
+    task reset_read;
+        begin
+            @(negedge clk);
+            rst_n = 0;
+            rd_start = 0;
+            rd_abort_new = 0;
+            m_axi_arready = 0;
+            m_axi_rvalid = 0;
+            m_axi_rlast = 0;
+            m_axi_rresp = 0;
+            m_axi_rid = 0;
+            fifo_wr_ready = 1;
+            repeat (3) @(negedge clk);
+            rst_n = 1;
+            repeat (2) @(negedge clk);
+        end
+    endtask
+
+    task snapshot_read;
+        begin
+            base_ar = ar_seen;
+            base_r = r_seen;
+            base_stored = stored_seen;
+            base_begin = begin_seen;
+            base_commit = commit_seen;
+            base_discard = discard_seen;
+            base_done = done_seen;
+            base_timeout = timeout_seen;
+            base_protocol = protocol_seen;
+        end
+    endtask
+
+    task test_ar_timeout;
+        begin
+            $display("[%0t] TEST6 AR timeout, late handshake and drain", $time);
+            reset_read();
+            snapshot_read();
+            pulse_start(32'h0000_5000, 13'd16);
+            while (!m_axi_arvalid) @(negedge clk);
+            // Continue stalling for twice the timeout: the event must not repeat.
+            repeat (2 * TIMEOUT_CYCLES) begin
+                @(negedge clk);
+                #1;
+                if (m_axi_arvalid !== 1'b1 || m_axi_araddr !== 32'h0000_5000 ||
+                    m_axi_arlen !== 8'd3 || m_axi_arid !== 0 ||
+                    m_axi_arsize !== 3'd2 || m_axi_arburst !== 2'b01 ||
+                    rd_busy !== 1'b1)
+                    $fatal(1, "TEST6 AR obligation/payload changed under stall");
+            end
+            if (timeout_seen != base_timeout + 1 || ar_seen != base_ar ||
+                begin_seen != base_begin || commit_seen != base_commit ||
+                discard_seen != base_discard || done_seen != base_done ||
+                protocol_seen != base_protocol)
+                $fatal(1, "TEST6 timeout or pre-handshake accounting");
+            fifo_wr_ready = 0;
+            wait_ar_and_accept(32'h0000_5000, 8'd3);
+            send_rbeat(32'h6000_0001, 0, 0);
+            send_rbeat(32'h6000_0002, 0, 0);
+            send_rbeat(32'h6000_0003, 0, 0);
+            send_rbeat(32'h6000_0004, 0, 1);
+            wait_cycles(4);
+            #2;
+            if (ar_seen != base_ar + 1 || r_seen != base_r + 4 ||
+                begin_seen != base_begin + 1 || stored_seen != base_stored ||
+                discard_seen != base_discard + 1 || fifo_discard_beats !== 0 ||
+                commit_seen != base_commit || done_seen != base_done ||
+                timeout_seen != base_timeout + 1 || protocol_seen != base_protocol ||
+                rd_busy !== 0 || rd_protocol_fault !== 0)
+                $fatal(1, "TEST6 late drain stored/committed data or lost obligation");
+            // Ordinary timeout recovery permits a successful new command.
+            fifo_wr_ready = 1;
+            pulse_start(32'h0000_5100, 13'd4);
+            wait_ar_and_accept(32'h0000_5100, 0);
+            send_rbeat(32'hA5A5_5A5A, 0, 1);
+            wait_cycles(4);
+            #2;
+            if (commit_seen != base_commit + 1 || done_seen != base_done + 1 ||
+                stored_seen != base_stored + 1 || timeout_seen != base_timeout + 1 ||
+                discard_seen != base_discard + 1)
+                $fatal(1, "TEST6 successful restart failed");
+        end
+    endtask
+
+    task test_missing_rlast;
+        begin
+            $display("[%0t] TEST7 missing RLAST, late drain and reset recovery", $time);
+            reset_read();
+            snapshot_read();
+            pulse_start(32'h0000_6000, 13'd8);
+            wait_ar_and_accept(32'h0000_6000, 1);
+            send_rbeat(32'h7000_0001, 0, 0);
+            send_rbeat(32'h7000_0002, 0, 0);
+            #2;
+            if (protocol_seen != base_protocol + 1 || rd_protocol_fault !== 1 ||
+                rd_busy !== 1 || stored_seen != base_stored + 2 ||
+                commit_seen != base_commit || discard_seen != base_discard)
+                $fatal(1, "TEST7 missing RLAST failed to enter fault drain");
+            fifo_wr_ready = 0;
+            // A mismatched RID with RLAST must not close the drain.
+            @(negedge clk);
+            m_axi_rid = 1;
+            m_axi_rvalid = 1;
+            m_axi_rlast = 1;
+            repeat (4) begin
+                @(negedge clk);
+                #1;
+                if (m_axi_rready !== 0 || r_seen != base_r + 2 ||
+                    discard_seen != base_discard || rd_busy !== 1)
+                    $fatal(1, "TEST7 mismatched RID escaped fault drain");
+            end
+            m_axi_rvalid = 0;
+            m_axi_rlast = 0;
+            m_axi_rid = 0;
+            send_rbeat(32'hDEAD_0001, 0, 0);
+            #2;
+            if (discard_seen != base_discard || stored_seen != base_stored + 2 ||
+                rd_busy !== 1)
+                $fatal(1, "TEST7 drained extra data stored or ended before RLAST");
+            send_rbeat(32'hDEAD_0002, 0, 1);
+            wait_cycles(4);
+            #2;
+            if (r_seen != base_r + 4 || ar_seen != base_ar + 1 ||
+                discard_seen != base_discard + 1 || fifo_discard_beats !== 2 ||
+                stored_seen != base_stored + 2 || commit_seen != base_commit ||
+                done_seen != base_done || protocol_seen != base_protocol + 1 ||
+                timeout_seen != base_timeout || rd_protocol_fault !== 1)
+                $fatal(1, "TEST7 late RLAST discard/fault accounting");
+            pulse_start(32'h0000_6100, 13'd4);
+            repeat (8) begin
+                @(negedge clk);
+                #1;
+                if (m_axi_arvalid !== 0 || rd_protocol_fault !== 1 ||
+                    ar_seen != base_ar + 1 || done_seen != base_done)
+                    $fatal(1, "TEST7 protocol fault restarted without reset");
+            end
+            reset_read();
+            pulse_start(32'h0000_6200, 13'd4);
+            wait_ar_and_accept(32'h0000_6200, 0);
+            send_rbeat(32'h5A5A_A5A5, 0, 1);
+            wait_cycles(4);
+            #2;
+            if (rd_protocol_fault !== 0 || commit_seen != base_commit + 1 ||
+                done_seen != base_done + 1 || discard_seen != base_discard + 1 ||
+                stored_seen != base_stored + 3 || protocol_seen != base_protocol + 1)
+                $fatal(1, "TEST7 coordinated reset recovery failed");
+        end
+    endtask
+
     // Optional FSDB dump stub.
     // Enabled by the VCS Makefile flow with +define+ENABLE_FSDB.
 `ifdef ENABLE_FSDB
@@ -300,7 +473,7 @@ module tb_dma_read_engine;
             errors = errors + 1;
         end
 
-        // TEST5: protocol fault last, because it is reset-required.
+        // TEST5: early protocol fault; later cases explicitly reset the DUT.
         $display("[%0t] TEST5 early RLAST protocol fault", $time);
         pulse_start(32'h0000_4000, 13'd16);
         wait_ar_and_accept(32'h0000_4000, 8'd3);
@@ -312,6 +485,9 @@ module tb_dma_read_engine;
                      $time,protocol_seen,rd_protocol_fault);
             errors = errors + 1;
         end
+
+        test_ar_timeout();
+        test_missing_rlast();
 
         if (errors == 0)
             $display("[%0t] PASS tb_dma_read_engine", $time);
