@@ -18,10 +18,12 @@ Each stage is then reopened with URG using only that stage VDB (no inputs
 or mapfile) and a separate full-hierarchy text/HTML verification report.
 Only validated stages can become inputs to the next merge.
 
-The report audit requires hierarchy.txt with NAME and LINE/COND/TOGGLE/FSM/
-BRANCH columns (TGL and CONDITION aliases are supported). Exact full instance
-paths must occur on metric rows, with numeric percentages or explicit N/A/--
-values. Unknown report layouts fail closed and retain merge-work-* for
+The report audit reads the indented URG V-2023.12 hierarchy.txt layout:
+repeated SCORE/LINE/COND/TOGGLE/FSM/BRANCH headers followed by metric rows
+ending in a local instance name. Header indentation reconstructs exact full
+instance paths; a NAME column or full path token is not required. TGL and
+CONDITION aliases are supported. Values must be numeric percentages or explicit
+N/A/-- values. Unknown report layouts fail closed and retain merge-work-* for
 inspection; confirm the text layout on URG V-2023.12-SP2-6 before relying on
 a licensed run. Zero percent is valid coverage, not a missing shape.
 Top-level inputs require all five metrics. All DUT rows require line/toggle,
@@ -29,8 +31,9 @@ and FIFO requires every non-FSM metric. Every instrumented metric from the
 previous stage or mapped source must remain available at its destination.
 
 Warnings/errors/fatals and SHAPEMISMATCH fail even with exit status zero.
-The sole missing-FSM candidate is an exact UCAPI-SNF diagnostic for the
-tb_dma_data_fifo source VDB, during its input read or stage 03 mapping.
+Missing-FSM candidates are exact, source-VDB-specific UCAPI-SNF diagnostics
+for the explicitly configured FSM-free units tb_dma_data_fifo, tb_dma_cdc and
+tb_dma_apb_regs, during their input read or stages 03, 07 and 08 respectively.
 It is accepted only when independent source metrics show no FSM but complete
 non-FSM metrics, and the output passes the canonical hierarchy/metric audit.
 Missing, empty, unreadable, or incomplete stage databases always fail.

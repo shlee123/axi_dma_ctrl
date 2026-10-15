@@ -63,9 +63,9 @@ mapping or flexible shape merge is used. The final report scopes coverage to
 the canonical DUT subtree, including its reset synchronizers, rather than
 testbench stimulus code.
 
-Unit and integration tests use different burst/timeout/FIFO parameter values.
-A source-path match does not prove that their instrumented coverage shapes are
-compatible. URG diagnostics are treated as failures, even if URG returns zero.
+A source-path match does not prove that instrumented coverage shapes are
+compatible. Preserve the aligned coverage elaboration profile across unit and
+integration tests; recheck parameters and instrumentation when adding tests. URG diagnostics are treated as failures, even if URG returns zero.
 Do not suppress such warnings to obtain a higher coverage score; first inspect
 the diagnostic and align incompatible instrumentation or parameter profiles.
 
@@ -76,8 +76,9 @@ The Coverage Merge CI additionally elaborates source and destination paths with
 Icarus and runs deterministic merge-contract tests. These tests substitute URG;
 they do not prove bin merging or measure RTL coverage.
 
-In a real merge, all eight mapping operations must finish without URG
-warnings/errors, the final VDB and dashboard must exist, and the full-hierarchy
+In a real merge, all eight mapping operations must finish without unaccepted URG
+diagnostics (see STRICT_VALIDATION.md for the narrowly validated missing-FSM
+exceptions), the final VDB and dashboard must exist, and the full-hierarchy
 report must contain the canonical top, DUT, and all six destination instances.
 The mapping audit records requested mappings, not bin-level contribution.
 Review mapping/*.log and the report in URG/Verdi to confirm contributions and
